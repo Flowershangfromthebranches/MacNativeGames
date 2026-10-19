@@ -27,18 +27,36 @@ static void user_input(const char *what){
  const char *owner=getenv("TOTK_SLOT_OWNER");bool agent=owner&&*owner&&strcmp(owner,"user");
  fprintf(stderr,"[input] user input (%s)%s%s\n",what,agent?": the user is playing this test session of ":"",agent?owner:"");
 }
-/* Keys from the window are the user's; scripted and auto-load presses use the synthetic entry.
-   Key 1 toggles the shortcut reminder in frontend.m. Key 2 (Mac key code 19) cycles MetalFX frame interpolation:
-   off -> 30+30 -> half the refresh rate -> uncapped (totk_mfx.m). Key 3 (key code 20) cycles 2K modes:
-   MetalFX 2K -> native 2K -> off (runtime_output_mode_cycle). Held-key repeats do not cycle. */
-enum { KEY_INTERP_TOGGLE = 19, KEY_OUTPUT_MODE_CYCLE = 20, KEY_ASPECT_TOGGLE = 21 };   /* 21: key 4, ultrawide on / off (aspect_patch.h) */
-void runtime_input_key_synthetic(unsigned code,int down){if(code>=128)return;pthread_mutex_lock(&inputLock);int press=down&&!keys[code];if(down&&!keys[code])pending|=button(code);keys[code]=(unsigned char)!!down;pthread_mutex_unlock(&inputLock);
- if(press&&code==18){extern void runtime_shortcut_help_toggle(void);runtime_shortcut_help_toggle();}
- if(press&&code==KEY_INTERP_TOGGLE){extern void dm_gfx_set_flag(const char *name,int v);dm_gfx_set_flag("mfx_interp",-1);}
- if(press&&code==KEY_OUTPUT_MODE_CYCLE)runtime_output_mode_cycle();
- if(press&&code==KEY_ASPECT_TOGGLE)runtime_aspect_toggle();}
-void runtime_input_key(unsigned code,int down){if(down&&code<128)user_input("keyboard");runtime_input_key_synthetic(code,down);}
-void runtime_input_clear(void){pthread_mutex_lock(&inputLock);memset(keys,0,sizeof(keys));pending=0;pthread_mutex_unlock(&inputLock);runtime_gamepad_clear();}
+/* Exact modifier matching and one action per press, shared by live and diagnostic input.
+   Consumed shortcut keys never enter the emulated controller. */
+enum { KEY_INTERP_TOGGLE=19, KEY_OUTPUT_MODE_CYCLE=20, KEY_ASPECT_TOGGLE=21 };
+extern int runtime_controls_handle_key(unsigned,unsigned) __attribute__((weak_import));
+extern int runtime_controls_active(void) __attribute__((weak_import));
+extern void runtime_front_control_test(const char *) __attribute__((weak_import));
+static unsigned char pressedKeys[128],shortcutHeld[128];
+static void input_key_modifiers(unsigned code,int down,unsigned modifiers){
+ if(code>=128)return;
+ pthread_mutex_lock(&inputLock);
+ int press=down&&!pressedKeys[code],held=shortcutHeld[code];pressedKeys[code]=(unsigned char)!!down;
+ if(!down)shortcutHeld[code]=0;
+ pthread_mutex_unlock(&inputLock);
+ if(held)return;
+ if(press&&runtime_controls_handle_key&&runtime_controls_handle_key(code,modifiers)){
+  pthread_mutex_lock(&inputLock);shortcutHeld[code]=1;pthread_mutex_unlock(&inputLock);return;
+ }
+ pthread_mutex_lock(&inputLock);if(down&&!keys[code])pending|=button(code);keys[code]=(unsigned char)!!down;pthread_mutex_unlock(&inputLock);
+ if(!runtime_controls_active||!runtime_controls_active()){
+  if(press&&code==18){extern void runtime_shortcut_help_toggle(void);runtime_shortcut_help_toggle();}
+  if(press&&code==KEY_INTERP_TOGGLE){extern void dm_gfx_set_flag(const char *,int);dm_gfx_set_flag("mfx_interp",-1);}
+  if(press&&code==KEY_OUTPUT_MODE_CYCLE)runtime_output_mode_cycle();
+  if(press&&code==KEY_ASPECT_TOGGLE)runtime_aspect_toggle();
+ }
+}
+void runtime_input_key_synthetic(unsigned code,int down){input_key_modifiers(code,down,0);}
+void runtime_input_key_modifiers(unsigned code,int down,unsigned modifiers){if(down&&code<128)user_input("keyboard");input_key_modifiers(code,down,modifiers);}
+void runtime_input_key(unsigned code,int down){runtime_input_key_modifiers(code,down,0);}
+void runtime_input_clear(void){pthread_mutex_lock(&inputLock);memset(keys,0,sizeof(keys));memset(pressedKeys,0,sizeof(pressedKeys));memset(shortcutHeld,0,sizeof(shortcutHeld));pending=0;pthread_mutex_unlock(&inputLock);runtime_gamepad_clear();}
+
 static void initialize(void){pthread_mutex_lock(&inputLock);enabled=true;pthread_mutex_unlock(&inputLock);fprintf(stderr,"[totk] native keyboard controller initialized\n");}
 /* Docked: one full-key controller as player 1 (id 0, style bit 0). Handheld (TOTK_OPERATION_MODE=handheld, the iPhone):
    the same input is the handheld controller (id 0x20, style bit 1, joy-cons attached) and player 1 is not connected;
@@ -182,6 +200,7 @@ static void *input_file(void *arg) {
             runtime_frame_step_pin(ms);
         } else if (!strcmp(line, "threads\n")) {   /* every guest thread's wait state and guest return chain, now (a hang: what is each thread waiting for) */
             runtime_dump_threads();
+        } else if (!strncmp(line,"control ",8)) { if(runtime_front_control_test)runtime_front_control_test(line+8);
         } else if (!strcmp(line, "close\n")) { runtime_front_request_close(); break; }
         else runtime_fail("invalid diagnostic input command");
     }
