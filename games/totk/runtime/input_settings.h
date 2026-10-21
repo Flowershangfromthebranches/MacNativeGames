@@ -1,6 +1,7 @@
 /* macOS binding editor for #42's control sheet. Drafts never reach the runtime
    until Apply. The event monitor is scoped to this sheet and removed on every exit. */
 #pragma once
+#include "controller_presets.h"
 static NSArray<NSString *> *input_action_titles(void){return @[@"A",@"B",@"X",@"Y",@"L3",@"R3",@"L",@"R",@"ZL",@"ZR",@"+",@"−",@(TOTK_UI("十字键 ←","D-pad ←")),@(TOTK_UI("十字键 ↑","D-pad ↑")),@(TOTK_UI("十字键 →","D-pad →")),@(TOTK_UI("十字键 ↓","D-pad ↓")),@(TOTK_UI("移动 ←","Move ←")),@(TOTK_UI("移动 →","Move →")),@(TOTK_UI("移动 ↑","Move ↑")),@(TOTK_UI("移动 ↓","Move ↓")),@(TOTK_UI("视角 ←","Look ←")),@(TOTK_UI("视角 →","Look →")),@(TOTK_UI("视角 ↑","Look ↑")),@(TOTK_UI("视角 ↓","Look ↓"))];}
 static NSString *input_source_title(unsigned source){
  if(!source)return @(TOTK_UI("未分配","Unassigned"));
@@ -23,6 +24,30 @@ static BOOL input_controller_decode(id values,RuntimeControllerBindings *b){
  for(int i=0;i<CONTROLLER_BUTTONS;i++){if(!input_number(values[i],0,65535)||!input_number(values[CONTROLLER_BUTTONS+i],0,255))return NO;next.map[i]=[values[i] unsignedIntValue];next.modes[i]=[values[CONTROLLER_BUTTONS+i] unsignedIntValue];}
  if(!input_number(values[34],0,1)||!input_number(values[35],0,1))return NO;next.swap_sticks=[values[34] intValue];next.invert_look_y=[values[35] intValue];if(!controller_bindings_valid(&next))return NO;*b=next;return YES;
 }
+static NSArray<NSString *> *input_controller_names(NSInteger preset){
+ NSArray *faces=preset==CONTROLLER_PRESET_SWITCH?@[@"下 / B",@"右 / A",@"左 / Y",@"上 / X"]:
+ preset==CONTROLLER_PRESET_XBOX?@[@"下 / A",@"右 / B",@"左 / X",@"上 / Y"]:
+ preset==CONTROLLER_PRESET_PLAYSTATION?@[@"下 / ×",@"右 / ○",@"左 / □",@"上 / △"]:
+ @[@"下 / B · A · ×",@"右 / A · B · ○",@"左 / Y · X · □",@"上 / X · Y · △"];
+ if(!totk_ui_zh()){faces=preset==CONTROLLER_PRESET_SWITCH?@[@"South / B",@"East / A",@"West / Y",@"North / X"]:
+ preset==CONTROLLER_PRESET_XBOX?@[@"South / A",@"East / B",@"West / X",@"North / Y"]:
+ preset==CONTROLLER_PRESET_PLAYSTATION?@[@"South / ×",@"East / ○",@"West / □",@"North / △"]:
+ @[@"South / B · A · ×",@"East / A · B · ○",@"West / Y · X · □",@"North / X · Y · △"];}
+ NSMutableArray *names=[faces mutableCopy];
+ NSArray *rest=preset==CONTROLLER_PRESET_SWITCH?@[@"L3",@"R3",@"L",@"R",@"ZL",@"ZR",@"+",@"−"]:
+ preset==CONTROLLER_PRESET_XBOX?@[@"L3",@"R3",@"LB",@"RB",@"LT",@"RT",@"Menu",@"View"]:
+ preset==CONTROLLER_PRESET_PLAYSTATION?@[@"L3",@"R3",@"L1",@"R1",@"L2",@"R2",@"Options",@"Share / Create"]:
+ @[@"L3",@"R3",@"L / LB / L1",@"R / RB / R1",@"ZL / LT / L2",@"ZR / RT / R2",@"+ / Menu / Options",@"− / View / Create"];
+ [names addObjectsFromArray:rest];[names addObjectsFromArray:@[@"←",@"↑",@"→",@"↓",@(TOTK_UI("触控板按下","Touchpad click"))]];return names;
+}
+static NSString *input_controller_hint(NSInteger preset){
+ switch(preset){
+ case CONTROLLER_PRESET_SWITCH:return @(TOTK_UI("Switch：A 确认、B 返回、X 跳跃、Y 攻击。选择后点“应用”生效。","Switch: A confirms, B returns, X jumps, Y attacks. Click Apply to activate."));
+ case CONTROLLER_PRESET_XBOX:return @(TOTK_UI("Xbox：A 确认、B 返回、X 跳跃、Y 攻击。选择后点“应用”生效。","Xbox: A confirms, B returns, X jumps, Y attacks. Click Apply to activate."));
+ case CONTROLLER_PRESET_PLAYSTATION:return @(TOTK_UI("PlayStation：× 确认、○ 返回、△ 跳跃、□ 攻击。选择后点“应用”生效。","PlayStation: × confirms, ○ returns, △ jumps, □ attacks. Click Apply to activate."));
+ default:return @(TOTK_UI("按实体位置设置。右侧为游戏中的 Switch 按键；预设会重置模式与摇杆选项。","Rows are physical positions; targets are Switch buttons. Presets reset modes and stick options."));
+ }
+}
 static void display_input_load(void){
  RuntimeKeyboardBindings k;RuntimeControllerBindings c;
  if(input_keyboard_decode([displayDefaults objectForKey:@"keyboardMouseBindingsV1"],&k))runtime_input_bindings_set(&k);
@@ -36,6 +61,9 @@ static void display_input_load(void){
 @property(weak) NSTextField *error;
 @property(strong) NSArray<NSButton *> *keyButtons;
 @property(strong) NSArray<NSPopUpButton *> *targets,*modes,*fires;
+@property(strong) NSPopUpButton *preset;
+@property(strong) NSArray<NSTextField *> *controllerLabels;
+@property(strong) NSTextField *controllerHint;
 @property(strong) NSButton *mouseLook,*mouseInvert,*swapSticks,*padInvert;
 @property(strong) NSSlider *sensitivity;
 @property(strong) id monitor;
@@ -46,14 +74,24 @@ static void display_input_load(void){
 -(void)stopRecording;
 -(NSEvent *)captureEvent:(NSEvent *)event;
 -(BOOL)validate:(NSArray<NSNumber *> *)shortcuts;
--(void)apply;
+-(BOOL)apply;
 @end
 static NSView *input_scroll(NSView *parent,CGFloat height,CGFloat top){NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(12,top,576,350-top)];scroll.hasVerticalScroller=YES;scroll.borderType=NSBezelBorder;NSView *content=[[NSView alloc] initWithFrame:NSMakeRect(0,0,550,height)];scroll.documentView=content;[parent addSubview:scroll];[content scrollPoint:NSMakePoint(0,height)];return content;}
 @implementation TOTKInputSettings
 -(void)keyboardOptionsChanged:(id)sender{(void)sender;_keyboard.mouse_look=self.mouseLook.state==NSControlStateValueOn;_keyboard.mouse_invert_y=self.mouseInvert.state==NSControlStateValueOn;_keyboard.mouse_sensitivity=(int)self.sensitivity.integerValue;}
--(void)controllerOptionsChanged:(id)sender{(void)sender;_controller.swap_sticks=self.swapSticks.state==NSControlStateValueOn;_controller.invert_look_y=self.padInvert.state==NSControlStateValueOn;}
+-(void)controllerOptionsChanged:(id)sender{(void)sender;[self.preset selectItemAtIndex:CONTROLLER_PRESET_CUSTOM];[self refreshControllerLabels];_controller.swap_sticks=self.swapSticks.state==NSControlStateValueOn;_controller.invert_look_y=self.padInvert.state==NSControlStateValueOn;}
 -(void)refreshKeyboard{for(int i=0;i<INPUT_ACTIONS*2;i++)self.keyButtons[i].title=input_source_title(_keyboard.source[i/2][i%2]);self.mouseLook.state=_keyboard.mouse_look;self.mouseInvert.state=_keyboard.mouse_invert_y;self.sensitivity.integerValue=_keyboard.mouse_sensitivity;}
--(void)refreshController{for(int i=0;i<CONTROLLER_BUTTONS;i++){
+-(void)refreshControllerLabels{
+ NSInteger preset=self.preset.indexOfSelectedItem;NSArray *names=input_controller_names(preset);
+ for(NSUInteger i=0;i<self.controllerLabels.count;i++)self.controllerLabels[i].stringValue=names[i];
+ for(NSPopUpButton *fire in self.fires)for(NSUInteger j=0;j<names.count;j++)[fire itemAtIndex:j].title=names[j];
+ self.controllerHint.stringValue=input_controller_hint(preset);
+}
+-(void)presetChanged:(id)sender{(void)sender;unsigned preset=(unsigned)self.preset.indexOfSelectedItem;
+ if(preset<CONTROLLER_PRESET_CUSTOM)controller_preset_apply(&_controller,preset);
+ [self refreshController];self.error.stringValue=@"";
+}
+-(void)refreshController{[self refreshControllerLabels];for(int i=0;i<CONTROLLER_BUTTONS;i++){
  unsigned map=_controller.map[i];int target=0;while(map&&!(map&1)){target++;map>>=1;}
  [self.targets[i] selectItemAtIndex:_controller.map[i]?target+1:0];[self.modes[i] selectItemAtIndex:controller_mode_kind(_controller.modes[i])];[self.fires[i] selectItemAtIndex:controller_mode_fire(_controller.modes[i])];self.fires[i].enabled=controller_mode_kind(_controller.modes[i])==CONTROLLER_AIM;
  }self.swapSticks.state=_controller.swap_sticks;self.padInvert.state=_controller.invert_look_y;}
@@ -80,8 +118,8 @@ static NSView *input_scroll(NSView *parent,CGFloat height,CGFloat top){NSScrollV
 
 -(void)clear:(NSButton *)button{[self stopRecording];_keyboard.source[button.tag/2][button.tag%2]=0;[self refreshKeyboard];}
 -(void)resetKeyboard:(id)sender{(void)sender;[self stopRecording];input_bindings_default(&_keyboard);[self refreshKeyboard];self.error.stringValue=@"";}
--(void)resetController:(id)sender{(void)sender;controller_map_default(_controller.map,_controller.modes);_controller.swap_sticks=_controller.invert_look_y=0;[self refreshController];self.error.stringValue=@"";}
--(void)controllerChanged:(NSPopUpButton *)sender{int i=(int)sender.tag;NSInteger t=self.targets[i].indexOfSelectedItem,kind=self.modes[i].indexOfSelectedItem;_controller.map[i]=t?1u<<(t-1):0;if(!t){kind=CONTROLLER_HOLD;[self.modes[i] selectItemAtIndex:kind];}
+-(void)resetController:(id)sender{(void)sender;[self.preset selectItemAtIndex:CONTROLLER_PRESET_GENERIC];[self presetChanged:nil];}
+-(void)controllerChanged:(NSPopUpButton *)sender{[self.preset selectItemAtIndex:CONTROLLER_PRESET_CUSTOM];[self refreshControllerLabels];int i=(int)sender.tag;NSInteger t=self.targets[i].indexOfSelectedItem,kind=self.modes[i].indexOfSelectedItem;_controller.map[i]=t?1u<<(t-1):0;if(!t){kind=CONTROLLER_HOLD;[self.modes[i] selectItemAtIndex:kind];}
  _controller.modes[i]=(uint8_t)(kind|(kind==CONTROLLER_AIM?self.fires[i].indexOfSelectedItem<<3:0));self.fires[i].enabled=kind==CONTROLLER_AIM;
 }
 -(void)addKeyboardTab:(NSTabView *)tabs{
@@ -99,21 +137,29 @@ static NSView *input_scroll(NSView *parent,CGFloat height,CGFloat top){NSScrollV
 }
 -(void)addControllerTab:(NSTabView *)tabs{
  NSView *tab=controls_tab(tabs,@(TOTK_UI("手柄","Controller")));
- controls_hint(tab,@(TOTK_UI("实体按钮按位置标记，适用于 Switch / Xbox / PlayStation。可多个按钮对应同一动作。","Physical positions work across Switch, Xbox and PlayStation; multiple buttons may share an action.")),350,36);
- NSView *rows=input_scroll(tab,CONTROLLER_BUTTONS*34+8,92);NSMutableArray *targets=[NSMutableArray new],*modes=[NSMutableArray new],*fires=[NSMutableArray new];
- NSArray *names=@[@(TOTK_UI("下 / B · A · ×","South / B · A · ×")),@(TOTK_UI("右 / A · B · ○","East / A · B · ○")),@(TOTK_UI("左 / Y · X · □","West / Y · X · □")),@(TOTK_UI("上 / X · Y · △","North / X · Y · △")),@"L3",@"R3",@"L / LB / L1",@"R / RB / R1",@"ZL / LT / L2",@"ZR / RT / R2",@"+ / Menu / Options",@"− / View / Create",@"←",@"↑",@"→",@"↓",@(TOTK_UI("触控板按下","Touchpad click"))];
+ NSTextField *presetLabel=[NSTextField labelWithString:@(TOTK_UI("手柄预设","Controller preset"))];presetLabel.frame=NSMakeRect(20,351,165,25);[tab addSubview:presetLabel];
+ self.preset=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(188,347,354,30) pullsDown:NO];[self.preset addItemsWithTitles:@[@"Switch",@"Xbox",@"PlayStation",@(TOTK_UI("通用（按位置）","Generic (by position)")),@(TOTK_UI("自定义","Custom"))]];self.preset.toolTip=@(TOTK_UI("预设会重置按键、触发模式和摇杆选项；点击应用后生效。","Presets reset buttons, modes and stick options; click Apply to activate."));self.preset.target=self;self.preset.action=@selector(presetChanged:);[self.preset selectItemAtIndex:CONTROLLER_PRESET_CUSTOM];[tab addSubview:self.preset];
+ self.controllerHint=controls_hint(tab,@"",301,42);
+ NSView *rows=input_scroll(tab,CONTROLLER_BUTTONS*34+8,92);rows.enclosingScrollView.frame=NSMakeRect(12,92,576,180);[rows scrollPoint:NSMakePoint(0,rows.frame.size.height)];
+ NSMutableArray *targets=[NSMutableArray new],*modes=[NSMutableArray new],*fires=[NSMutableArray new],*labels=[NSMutableArray new];
+ NSArray *headings=@[@(TOTK_UI("实体按钮","Physical button")),@(TOTK_UI("游戏按键","Switch button")),@(TOTK_UI("触发方式","Mode")),@(TOTK_UI("瞄准开火键","Aim fire button"))];
+ const CGFloat columns[]={20,200,310,414};for(int i=0;i<4;i++){NSTextField *h=[NSTextField labelWithString:headings[i]];h.frame=NSMakeRect(columns[i],276,i==0?175:130,20);h.font=[NSFont systemFontOfSize:12];h.textColor=NSColor.secondaryLabelColor;[tab addSubview:h];}
+ NSArray *names=input_controller_names(CONTROLLER_PRESET_CUSTOM);
  NSMutableArray *actions=[NSMutableArray arrayWithObject:@(TOTK_UI("未分配","Unassigned"))];[actions addObjectsFromArray:[input_action_titles() subarrayWithRange:NSMakeRange(0,16)]];
- for(int i=0;i<CONTROLLER_BUTTONS;i++){CGFloat y=(CONTROLLER_BUTTONS-1-i)*34+4;NSTextField *l=[NSTextField labelWithString:names[i]];l.frame=NSMakeRect(8,y+3,180,25);[rows addSubview:l];
+ for(int i=0;i<CONTROLLER_BUTTONS;i++){CGFloat y=(CONTROLLER_BUTTONS-1-i)*34+4;NSTextField *l=[NSTextField labelWithString:names[i]];l.frame=NSMakeRect(8,y+3,180,25);[rows addSubview:l];[labels addObject:l];
   NSPopUpButton *target=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(188,y,106,28) pullsDown:NO];[target addItemsWithTitles:actions];[targets addObject:target];
-  NSPopUpButton *mode=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(298,y,100,28) pullsDown:NO];[mode addItemsWithTitles:@[@"hold",@"tap",@"toggle",@"aim"]];mode.toolTip=@(TOTK_UI("hold：按住；tap：短按；toggle：切换至移动结束；aim：按住瞄准，开火键释放。","hold: held; tap: pulse; toggle: until movement ends; aim: hold to aim, fire releases."));[modes addObject:mode];
+  NSPopUpButton *mode=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(298,y,100,28) pullsDown:NO];[mode addItemsWithTitles:@[@(TOTK_UI("按住","Hold")),@(TOTK_UI("短按","Tap")),@(TOTK_UI("切换","Toggle")),@(TOTK_UI("瞄准","Aim"))]];mode.toolTip=@(TOTK_UI("hold：按住；tap：短按；toggle：切换至移动结束；aim：按住瞄准，开火键释放。","hold: held; tap: pulse; toggle: until movement ends; aim: hold to aim, fire releases."));[modes addObject:mode];
   NSPopUpButton *fire=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(402,y,140,28) pullsDown:NO];[fire addItemsWithTitles:names];fire.toolTip=@(TOTK_UI("aim 模式的开火实体按钮","Physical fire button for aim mode"));[fires addObject:fire];
   for(NSPopUpButton *p in @[target,mode,fire]){p.tag=i;p.target=self;p.action=@selector(controllerChanged:);[rows addSubview:p];}}
- self.targets=targets;self.modes=modes;self.fires=fires;
+ self.targets=targets;self.modes=modes;self.fires=fires;self.controllerLabels=labels;
  self.swapSticks=[NSButton checkboxWithTitle:@(TOTK_UI("交换左右摇杆","Swap left/right sticks")) target:self action:@selector(controllerOptionsChanged:)];self.swapSticks.frame=NSMakeRect(20,57,270,25);[tab addSubview:self.swapSticks];
  self.padInvert=[NSButton checkboxWithTitle:@(TOTK_UI("反转视角摇杆 Y","Invert look-stick Y")) target:self action:@selector(controllerOptionsChanged:)];self.padInvert.frame=NSMakeRect(300,57,270,25);[tab addSubview:self.padInvert];
  NSButton *reset=[NSButton buttonWithTitle:@(TOTK_UI("恢复手柄默认","Reset controller")) target:self action:@selector(resetController:)];reset.frame=NSMakeRect(20,22,220,28);[tab addSubview:reset];
 }
--(void)beginDraft{[self stopRecording];runtime_input_bindings_get(&_keyboard);runtime_gamepad_bindings_get(&_controller);[self refreshKeyboard];[self refreshController];self.error.stringValue=@"";}
+-(void)beginDraft{[self stopRecording];runtime_input_bindings_get(&_keyboard);runtime_gamepad_bindings_get(&_controller);
+ id saved=[displayDefaults objectForKey:@"controllerPresetV1"];NSInteger preset=input_number(saved,0,CONTROLLER_PRESET_CUSTOM)?[saved integerValue]:CONTROLLER_PRESET_CUSTOM;
+ if(preset<CONTROLLER_PRESET_CUSTOM&&!controller_preset_matches(&_controller,(unsigned)preset))preset=CONTROLLER_PRESET_CUSTOM;
+ [self.preset selectItemAtIndex:preset];[self refreshKeyboard];[self refreshController];self.error.stringValue=@"";}
 -(BOOL)validate:(NSArray<NSNumber *> *)shortcuts{
  _keyboard.mouse_look=self.mouseLook.state==NSControlStateValueOn;_keyboard.mouse_invert_y=self.mouseInvert.state==NSControlStateValueOn;_keyboard.mouse_sensitivity=(int)self.sensitivity.integerValue;
  _controller.swap_sticks=self.swapSticks.state==NSControlStateValueOn;_controller.invert_look_y=self.padInvert.state==NSControlStateValueOn;
@@ -123,6 +169,12 @@ static NSView *input_scroll(NSView *parent,CGFloat height,CGFloat top){NSScrollV
   for(NSNumber *key in shortcuts)if(key.unsignedLongLongValue==s){self.error.stringValue=@(TOTK_UI("游戏绑定与快捷键冲突，请更换其中一个。","Game binding conflicts with a shortcut; change one of them."));return NO;}}
  if(!controller_bindings_valid(&_controller)){self.error.stringValue=@(TOTK_UI("手柄 aim 的开火按钮不能是它自身。","An aim binding needs a different physical fire button."));return NO;}self.error.stringValue=@"";return YES;
 }
--(void)apply{runtime_input_bindings_set(&_keyboard);runtime_gamepad_bindings_set(&_controller);[displayDefaults setObject:input_keyboard_values(&_keyboard) forKey:@"keyboardMouseBindingsV1"];[displayDefaults setObject:input_controller_values(&_controller) forKey:@"controllerBindingsV1"];}
+-(BOOL)apply{
+ RuntimeControllerBindings previous;runtime_gamepad_bindings_get(&previous);
+ if(!runtime_gamepad_bindings_set(&_controller)){self.error.stringValue=@(TOTK_UI("手柄设置未应用，请重试。","Controller settings were not applied; try again."));return NO;}
+ if(!runtime_input_bindings_set(&_keyboard)){runtime_gamepad_bindings_set(&previous);self.error.stringValue=@(TOTK_UI("键鼠设置未应用，请重试。","Keyboard/mouse settings were not applied; try again."));return NO;}
+ [displayDefaults setObject:input_keyboard_values(&_keyboard) forKey:@"keyboardMouseBindingsV1"];[displayDefaults setObject:input_controller_values(&_controller) forKey:@"controllerBindingsV1"];
+ [displayDefaults setInteger:self.preset.indexOfSelectedItem forKey:@"controllerPresetV1"];return YES;
+}
 -(void)dealloc{if(_monitor)[NSEvent removeMonitor:_monitor];}
 @end

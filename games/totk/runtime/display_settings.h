@@ -173,7 +173,7 @@ static NSPopUpButton *controls_popup(NSView *v,NSArray *items,CGFloat y){NSPopUp
  if(![scan scanInt:&cap]||!scan.isAtEnd||(cap!=0&&(cap<15||cap>240))){self.error.stringValue=@(TOTK_UI("帧率上限应为 0 或 15–240。","Frame limit must be 0 or 15–240."));return;}
  for(int i=0;i<5;i++)for(int j=0;j<i;j++)if(self.draftKeys[i].unsignedLongLongValue&&[self.draftKeys[i] isEqual:self.draftKeys[j]]){self.error.stringValue=@(TOTK_UI("快捷键重复，请更换后应用。","Duplicate shortcut; choose another binding."));return;}
  if(![self.inputSettings validate:self.draftKeys])return;
- [self.inputSettings apply];
+ if(![self.inputSettings apply])return;
  displayResolution=(int)self.resolution.indexOfSelectedItem;displayMode=(int)self.mode.indexOfSelectedItem;controlQuality=(int)self.quality.indexOfSelectedItem;controlCap=cap;controlVsync=self.vsync.state==NSControlStateValueOn;controlFI=self.generation.state==NSControlStateValueOn;
  for(int i=0;i<5;i++)atomic_store(&controlKeys[i],self.draftKeys[i].unsignedLongLongValue);
  if((self.aa.indexOfSelectedItem==1)!=!!taa_enabled())taa_toggle();

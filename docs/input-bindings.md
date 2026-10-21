@@ -30,6 +30,31 @@ the cursor. It is off by default; the existing keyboard defaults and aliases
 
 ## Controller
 
+Select one of four controller presets, then **Apply**:
+
+| Preset | Physical south / east / west / north → Switch buttons | Main actions |
+| --- | --- | --- |
+| Switch | B / A / Y / X | A confirms, B returns, X jumps, Y attacks. |
+| Xbox | A / B / X / Y | A confirms, B returns, X jumps, Y attacks. |
+| PlayStation | A / B / Y / X | Cross confirms, Circle returns, Triangle jumps, Square attacks. |
+| Generic (by position) | B / A / Y / X | East confirms, south returns, north jumps, west attacks. |
+
+Switch and Generic share the same position mapping; Switch displays Nintendo
+labels. Xbox follows the letters printed on its buttons. PlayStation uses
+Cross/Circle for confirm/return while keeping Triangle/Square for jump/attack.
+These action descriptions refer to the game's usual controls; context and the
+game's own options can change actions. This is a selected layout, not automatic
+per-device profile switching: the selected preset applies to connected pads.
+
+Choosing a preset resets its buttons, modes (Hold), stick swap and Y inversion
+in the draft. Custom preserves the current draft. Manual edits mark it Custom.
+The preset selector and fire-button labels follow the selected controller family.
+The target column always names the Switch buttons delivered to the game.
+Existing saved bindings stay unchanged and initially show Custom. Preset identity
+is stored separately as `controllerPresetV1`; a missing, malformed or mismatching
+identity never overwrites the saved binding array. Cancel discards preset changes.
+Runtime rejection keeps the sheet open and does not save the rejected preset.
+
 Rows identify physical positions and Switch / Xbox / PlayStation labels in that
 order. Choose a Switch button or Unassigned for each physical button. Multiple
 physical buttons may share one game action. Existing Nintendo face-button
@@ -88,7 +113,12 @@ These probes do not constitute physical-controller or in-game play testing.
 两个绑定，点击后按键或鼠标按钮；Esc 取消录入，× 清除。重复绑定、快捷键冲突会在
 应用前提示。可开启按住鼠标右键拖动视角，并调整灵敏度、反转 Y。
 
-手柄可按实体按钮位置调整游戏动作，支持原有 hold / tap / toggle / aim 模式，以及
+手柄页提供 Switch、Xbox、PlayStation、通用（按位置）四套预设，选择后点击应用。
+Xbox 按字母对应；PlayStation 用 × 确认、○ 返回、△ 跳跃、□ 攻击；Switch 和通用
+按 Switch 的按钮位置对应。已有自定义绑定保留，手动更改后显示“自定义”。
+预设会将触发方式恢复为按住，并关闭摇杆交换和 Y 反转；取消不会改变当前配置。
+
+手柄也可按实体按钮位置调整游戏动作，支持原有 hold / tap / toggle / aim 模式，以及
 左右摇杆交换、视角 Y 反转。aim 需指定另一个实体按钮开火。
 
 “应用”后生效并保存；“取消”不改当前设置；恢复默认也需应用。打开菜单时游戏输入

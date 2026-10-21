@@ -41,5 +41,31 @@ int main(void){@autoreleasepool{
  RuntimeKeyboardBindings decoded;NSMutableArray *malformed=[input_keyboard_values(&probeKeyboard) mutableCopy];malformed[0]=@1.5;assert(!input_keyboard_decode(malformed,&decoded));malformed[0]=@"12";assert(!input_keyboard_decode(malformed,&decoded));assert(!input_keyboard_decode(@[],&decoded));
  RuntimeControllerBindings pad;assert(!input_controller_decode(@[],&pad));NSMutableArray *bad=[input_controller_values(&probeController) mutableCopy];bad[0]=@3;assert(!input_controller_decode(bad,&pad));
  [displayDefaults setObject:@[] forKey:@"keyboardMouseBindingsV1"];display_input_load();assert(probeKeyboard.source[0][0]==12);
+ // Presets are drafts until Apply, survive preference reload, and manual edits become Custom.
+ for(NSInteger preset=0;preset<CONTROLLER_PRESET_CUSTOM;preset++){
+  [displaySettings showSettings:nil];RuntimeControllerBindings before=probeController;
+  [s.preset selectItemAtIndex:preset];[NSApp sendAction:s.preset.action to:s.preset.target from:s.preset];
+  RuntimeControllerBindings draft=s.controller;assert(controller_preset_matches(&draft,(unsigned)preset));
+  assert(controller_bindings_equal(&before,&probeController));[displaySettings cancelSettings:nil];
+  assert(controller_bindings_equal(&before,&probeController));
+  [displaySettings showSettings:nil];[s.preset selectItemAtIndex:preset];[s presetChanged:nil];
+  [displaySettings applySettings:nil];assert(!displaySettings.window.sheetParent&&controller_preset_matches(&probeController,(unsigned)preset));
+  controller_map_default(probeController.map,probeController.modes);display_input_load();
+  [displaySettings showSettings:nil];assert(s.preset.indexOfSelectedItem==preset&&controller_preset_matches(&probeController,(unsigned)preset));
+  assert([s.controllerLabels[0].stringValue isEqualToString:input_controller_names(preset)[0]]);
+  if(out&&preset==CONTROLLER_PRESET_XBOX)capture_input_tab(4,[@(out) stringByAppendingPathComponent:@"controller-xbox-preset.png"]);
+  assert(s.targets[0].indexOfSelectedItem==__builtin_ctz(probeController.map[0])+1);
+  [displaySettings cancelSettings:nil];
+ }
+ [displaySettings showSettings:nil];[s.preset selectItemAtIndex:CONTROLLER_PRESET_XBOX];[s presetChanged:nil];
+ [s.targets[0] selectItemAtIndex:3];[s controllerChanged:s.targets[0]];assert(s.preset.indexOfSelectedItem==CONTROLLER_PRESET_CUSTOM);[displaySettings cancelSettings:nil];
+ // Rejecting a runtime apply must keep the sheet open and leave the saved preset untouched.
+ [displaySettings showSettings:nil];[s.preset selectItemAtIndex:CONTROLLER_PRESET_XBOX];[s presetChanged:nil];
+ probeRejectController=1;[displaySettings applySettings:nil];assert(displaySettings.window.sheetParent&&s.error.stringValue.length);
+ assert([displayDefaults integerForKey:@"controllerPresetV1"]==CONTROLLER_PRESET_GENERIC);
+ probeRejectController=0;[displaySettings cancelSettings:nil];
+ // A missing/malformed or stale preset label must never overwrite an existing custom mapping.
+ [displayDefaults removeObjectForKey:@"controllerPresetV1"];[displaySettings showSettings:nil];assert(s.preset.indexOfSelectedItem==CONTROLLER_PRESET_CUSTOM);[displaySettings cancelSettings:nil];
+ [displayDefaults setInteger:CONTROLLER_PRESET_XBOX forKey:@"controllerPresetV1"];[displaySettings showSettings:nil];assert(s.preset.indexOfSelectedItem==CONTROLLER_PRESET_CUSTOM);[displaySettings cancelSettings:nil];
  [displayDefaults removePersistentDomainForName:suite];[window orderOut:nil];puts("PASS: capture scope, keyboard/mouse/controller drafts, validation, apply/cancel/reset and preference reload");
 }}
