@@ -4,6 +4,18 @@
 #include <assert.h>
 void runtime_input_key(unsigned c,int d){(void)c;(void)d;}
 void runtime_input_key_modifiers(unsigned c,int d,unsigned m){(void)c;(void)d;(void)m;}
+static RuntimeKeyboardBindings probeKeyboard;
+static RuntimeControllerBindings probeController;
+static int probeBindingsLoaded,probeSuspended;
+static void probe_bindings_init(void){if(!probeBindingsLoaded){input_bindings_default(&probeKeyboard);controller_map_default(probeController.map,probeController.modes);probeBindingsLoaded=1;}}
+void runtime_input_bindings_get(RuntimeKeyboardBindings *b){probe_bindings_init();*b=probeKeyboard;}
+int runtime_input_bindings_set(const RuntimeKeyboardBindings *b){if(!input_bindings_valid(b))return 0;probeKeyboard=*b;return 1;}
+void runtime_gamepad_bindings_get(RuntimeControllerBindings *b){probe_bindings_init();*b=probeController;}
+int runtime_gamepad_bindings_set(const RuntimeControllerBindings *b){if(!controller_bindings_valid(b))return 0;probeController=*b;return 1;}
+void runtime_input_mouse_button(unsigned b,int d){(void)b;(void)d;}
+void runtime_input_mouse_motion(double x,double y){(void)x;(void)y;}
+void runtime_input_suspend(int s){probeSuspended=s;}
+int runtime_input_suspended(void){return probeSuspended;}
 static float testAspect;
 int runtime_aspect_toggle(void){testAspect=testAspect?0:21.0f/9;return 1;}
 float runtime_aspect_now(void){return testAspect;}
@@ -104,5 +116,5 @@ static void start(void){dispatch_async(dispatch_get_main_queue(),^{
 int main(int argc,char **argv){if(argc>1&&!strcmp(argv[1],"--preview"))setenv("TOTK_DISPLAY_PROBE_PREVIEW","1",1);setenv("TOTK_SLOT_OWNER","codex-display-probe",1);setenv("TOTK_ASSUME_FOCUS","1",1);
  @autoreleasepool {NSUserDefaults *d=[[NSUserDefaults alloc] initWithSuiteName:@"org.macnativegames.totk.display.tests"];[d removePersistentDomainForName:@"org.macnativegames.totk.display.tests"];}
  if(!getenv("TOTK_DISPLAY_PROBE_PREVIEW"))dispatch_after(dispatch_time(DISPATCH_TIME_NOW,45*NSEC_PER_SEC),dispatch_get_main_queue(),^{runtime_fail("display transition timeout");});
- runtime_front_run(start);
+ runtime_front_run(start);return 0;
 }

@@ -72,11 +72,13 @@ static void display_apply_mode(void) {
 }
 
 
-@interface TOTKDisplaySettings:NSWindowController<NSWindowDelegate>
+@class TOTKInputSettings;
+@interface TOTKDisplaySettings:NSWindowController<NSWindowDelegate,NSTabViewDelegate>
 @property(strong) NSPopUpButton *resolution,*mode,*quality,*aa;
 @property(strong) NSButton *vsync,*generation;
 @property(strong) NSTextField *cap,*status,*error;
 @property(strong) NSTabView *tabs;
+@property(strong) TOTKInputSettings *inputSettings;
 @property(strong) NSArray<NSButton *> *hotkeyButtons;
 @property(strong) NSMutableArray<NSNumber *> *draftKeys;
 @property(strong) id keyMonitor;
@@ -98,12 +100,13 @@ static NSView *controls_tab(NSTabView *tabs,NSString *name){NSTabViewItem *item=
 static void controls_label(NSView *v,NSString *text,CGFloat y){NSTextField *l=[NSTextField labelWithString:text];l.frame=NSMakeRect(20,y,190,25);[v addSubview:l];}
 static NSTextField *controls_hint(NSView *v,NSString *text,CGFloat y,CGFloat height){NSTextField *l=[NSTextField wrappingLabelWithString:text];l.frame=NSMakeRect(20,y,550,height);l.font=[NSFont systemFontOfSize:13];l.textColor=NSColor.secondaryLabelColor;[v addSubview:l];return l;}
 static NSPopUpButton *controls_popup(NSView *v,NSArray *items,CGFloat y){NSPopUpButton *b=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(218,y,350,28) pullsDown:NO];[b addItemsWithTitles:items];[v addSubview:b];return b;}
+#include "input_settings.h"
 @implementation TOTKDisplaySettings
 -(instancetype)init{
  NSPanel *p=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,660,550) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable backing:NSBackingStoreBuffered defer:NO];
  if((self=[super initWithWindow:p])){
   p.title=@(TOTK_UI("控制菜单","Game Controls"));p.releasedWhenClosed=NO;p.delegate=self;
-  self.tabs=[[NSTabView alloc] initWithFrame:NSMakeRect(20,100,620,425)];[p.contentView addSubview:self.tabs];
+  self.tabs=[[NSTabView alloc] initWithFrame:NSMakeRect(20,100,620,425)];[p.contentView addSubview:self.tabs];self.tabs.delegate=self;
   NSView *graphics=controls_tab(self.tabs,@(TOTK_UI("画面","Graphics")));
   controls_label(graphics,@(TOTK_UI("目标分辨率","Target resolution")),326);
   self.resolution=controls_popup(graphics,@[@"1280 × 720",@"1600 × 900",@"1920 × 1080",@"2560 × 1440"],322);
@@ -129,17 +132,19 @@ static NSPopUpButton *controls_popup(NSView *v,NSArray *items,CGFloat y){NSPopUp
   NSMutableArray *buttons=[NSMutableArray new];NSArray *actions=@[@(TOTK_UI("打开控制菜单","Open controls")),@(TOTK_UI("显示 / 隐藏提示","Show / hide overlays")),@(TOTK_UI("开关补帧","Toggle frame generation")),@(TOTK_UI("切换超分档位","Cycle upscale preset")),@(TOTK_UI("切换超宽屏（支持版本）","Toggle ultrawide (supported versions)"))];
   for(int i=0;i<5;i++){CGFloat y=332-i*48;controls_label(keys,actions[i],y);NSButton *b=[NSButton buttonWithTitle:@"" target:self action:@selector(recordShortcut:)];b.frame=NSMakeRect(218,y-3,350,30);b.tag=i;[keys addSubview:b];[buttons addObject:b];}self.hotkeyButtons=buttons;
   controls_hint(keys,@(TOTK_UI("点击右侧按钮，再按要绑定的按键或组合键。Esc 取消录入；Delete 清除。\n⌘, 始终可以打开菜单。快捷键改动在点击“应用”后生效。","Click a button and press a key or chord. Esc cancels recording; Delete clears it.\nCommand+, always opens the menu. Shortcut changes take effect on Apply.")),27,92);
+  self.inputSettings=[TOTKInputSettings new];self.inputSettings.hostWindow=p;[self.inputSettings addKeyboardTab:self.tabs];[self.inputSettings addControllerTab:self.tabs];
   self.status=controls_hint(p.contentView,@"",65,28);self.status.frame=NSMakeRect(26,65,608,30);
-  self.error=controls_hint(p.contentView,@"",38,24);self.error.textColor=NSColor.systemRedColor;self.error.frame=NSMakeRect(26,38,405,24);
+  self.error=controls_hint(p.contentView,@"",38,24);self.error.textColor=NSColor.systemRedColor;self.error.frame=NSMakeRect(26,38,605,24);self.error.font=[NSFont systemFontOfSize:11];self.inputSettings.error=self.error;
   NSButton *cancel=[NSButton buttonWithTitle:@(TOTK_UI("取消","Cancel")) target:self action:@selector(cancelSettings:)];cancel.frame=NSMakeRect(444,16,88,32);cancel.keyEquivalent=@"\e";[p.contentView addSubview:cancel];
   NSButton *apply=[NSButton buttonWithTitle:@(TOTK_UI("应用","Apply")) target:self action:@selector(applySettings:)];apply.frame=NSMakeRect(541,16,88,32);apply.keyEquivalent=@"\r";[p.contentView addSubview:apply];
  }return self;
 }
+-(void)tabView:(NSTabView *)tabView willSelectTabViewItem:(NSTabViewItem *)item{(void)tabView;(void)item;[self stopRecording];[self.inputSettings stopRecording];}
 -(void)stopRecording{if(self.keyMonitor){[NSEvent removeMonitor:self.keyMonitor];self.keyMonitor=nil;}for(int i=0;i<5;i++)self.hotkeyButtons[i].title=hotkey_title(self.draftKeys[i].unsignedLongLongValue);}
 -(void)recordShortcut:(NSButton *)button{
- [self stopRecording];button.title=@(TOTK_UI("请按快捷键（Esc 取消）","Press a shortcut (Esc cancels)"));NSInteger index=button.tag;__weak __typeof__(self) weak=self;
+ [self.inputSettings stopRecording];[self stopRecording];button.title=@(TOTK_UI("请按快捷键（Esc 取消）","Press a shortcut (Esc cancels)"));NSInteger index=button.tag;__weak __typeof__(self) weak=self;
  self.keyMonitor=[NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *e){
-  __typeof__(self) strong=weak;if(!strong)return e;if(e.isARepeat)return nil;
+  __typeof__(self) strong=weak;if(!strong||e.window!=strong.window)return e;if(e.isARepeat)return nil;
   if(e.keyCode==53){[strong stopRecording];return nil;}
   unsigned mods=hotkey_mods(e.modifierFlags);uint64_t key=e.keyCode==51?0:hotkey_pack(e.keyCode,mods);
   if(key==hotkey_pack(12,1)||key==hotkey_pack(43,1)||key==hotkey_pack(23,0)){strong.error.stringValue=@(TOTK_UI("⌘Q、⌘, 和 5 是保留快捷键。","Command+Q, Command+, and 5 are reserved."));[strong stopRecording];return nil;}
@@ -157,15 +162,18 @@ static NSPopUpButton *controls_popup(NSView *v,NSArray *items,CGFloat y){NSPopUp
  [self.aa selectItemAtIndex:taa_enabled()?1:0];
  self.vsync.state=controlVsync;self.cap.integerValue=controlCap;self.generation.state=controlFI;self.error.stringValue=@"";
  self.draftKeys=[NSMutableArray new];for(int i=0;i<5;i++)[self.draftKeys addObject:@(atomic_load(&controlKeys[i]))];[self stopRecording];[self refreshStatus];
+ [self.inputSettings beginDraft];
  self.statusTimer=[NSTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(refreshStatus) userInfo:nil repeats:YES];
- runtime_input_clear();[window beginSheet:self.window completionHandler:nil];
+ runtime_input_suspend(1);[window beginSheet:self.window completionHandler:nil];
 }
 -(BOOL)windowShouldClose:(NSWindow *)sender{(void)sender;[self cancelSettings:nil];return NO;}
--(void)cancelSettings:(id)sender{(void)sender;[self stopRecording];[self.statusTimer invalidate];self.statusTimer=nil;[window endSheet:self.window];[self.window orderOut:nil];}
+-(void)cancelSettings:(id)sender{(void)sender;[self.inputSettings stopRecording];[self stopRecording];[self.statusTimer invalidate];self.statusTimer=nil;[window endSheet:self.window];[self.window orderOut:nil];runtime_input_suspend(!assume_focus()&&!window.isKeyWindow);}
 -(void)applySettings:(id)sender{
- (void)sender;[self stopRecording];NSString *s=[self.cap.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];NSScanner *scan=[NSScanner scannerWithString:s];int cap=0;
+ (void)sender;[self.inputSettings stopRecording];[self stopRecording];NSString *s=[self.cap.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];NSScanner *scan=[NSScanner scannerWithString:s];int cap=0;
  if(![scan scanInt:&cap]||!scan.isAtEnd||(cap!=0&&(cap<15||cap>240))){self.error.stringValue=@(TOTK_UI("帧率上限应为 0 或 15–240。","Frame limit must be 0 or 15–240."));return;}
  for(int i=0;i<5;i++)for(int j=0;j<i;j++)if(self.draftKeys[i].unsignedLongLongValue&&[self.draftKeys[i] isEqual:self.draftKeys[j]]){self.error.stringValue=@(TOTK_UI("快捷键重复，请更换后应用。","Duplicate shortcut; choose another binding."));return;}
+ if(![self.inputSettings validate:self.draftKeys])return;
+ [self.inputSettings apply];
  displayResolution=(int)self.resolution.indexOfSelectedItem;displayMode=(int)self.mode.indexOfSelectedItem;controlQuality=(int)self.quality.indexOfSelectedItem;controlCap=cap;controlVsync=self.vsync.state==NSControlStateValueOn;controlFI=self.generation.state==NSControlStateValueOn;
  for(int i=0;i<5;i++)atomic_store(&controlKeys[i],self.draftKeys[i].unsignedLongLongValue);
  if((self.aa.indexOfSelectedItem==1)!=!!taa_enabled())taa_toggle();

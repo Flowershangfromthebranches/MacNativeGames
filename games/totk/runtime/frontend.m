@@ -4,6 +4,7 @@
 #import <QuartzCore/CATransaction.h>
 #import <Metal/Metal.h>
 #import <CoreVideo/CoreVideo.h>
+#include <IOKit/hidsystem/ev_keymap.h>
 #include <stdatomic.h>
 #include <math.h>
 #include "runtime.h"
@@ -104,6 +105,7 @@ static CVReturn vsync_callback(CVDisplayLinkRef link,const CVTimeStamp *now,cons
 -(BOOL)canBecomeKeyWindow{return YES;}
 -(BOOL)canBecomeMainWindow{return YES;}
 @end
+static int front_modifier_down(unsigned code,NSEventModifierFlags flags){unsigned mask=0;switch(code){case 56:mask=NX_DEVICELSHIFTKEYMASK;break;case 60:mask=NX_DEVICERSHIFTKEYMASK;break;case 58:mask=NX_DEVICELALTKEYMASK;break;case 61:mask=NX_DEVICERALTKEYMASK;break;case 59:mask=NX_DEVICELCTLKEYMASK;break;case 62:mask=NX_DEVICERCTLKEYMASK;break;case 55:mask=NX_DEVICELCMDKEYMASK;break;case 54:mask=NX_DEVICERCMDKEYMASK;break;}return mask&&(flags&mask)!=0;}
 @interface TOTKInputView:NSView
 @end
 @implementation TOTKInputView
@@ -113,7 +115,16 @@ static CVReturn vsync_callback(CVDisplayLinkRef link,const CVTimeStamp *now,cons
  if(!e.isARepeat)runtime_input_key_modifiers(e.keyCode,1,mods);
 }
 -(void)keyUp:(NSEvent *)e{runtime_input_key_modifiers(e.keyCode,0,0);}
--(void)flagsChanged:(NSEvent *)e{if(e.keyCode==56)runtime_input_key(56,!!(e.modifierFlags&NSEventModifierFlagShift));if(e.keyCode==58)runtime_input_key(58,!!(e.modifierFlags&NSEventModifierFlagOption));}
+-(void)flagsChanged:(NSEvent *)e{
+ runtime_input_key(e.keyCode,front_modifier_down(e.keyCode,e.modifierFlags));
+}
+-(void)mouseDown:(NSEvent *)e{runtime_input_mouse_button((unsigned)e.buttonNumber,1);}
+-(void)mouseUp:(NSEvent *)e{runtime_input_mouse_button((unsigned)e.buttonNumber,0);}
+-(void)rightMouseDown:(NSEvent *)e{runtime_input_mouse_button((unsigned)e.buttonNumber,1);}
+-(void)rightMouseUp:(NSEvent *)e{runtime_input_mouse_button((unsigned)e.buttonNumber,0);runtime_input_mouse_motion(0,0);}
+-(void)otherMouseDown:(NSEvent *)e{runtime_input_mouse_button((unsigned)e.buttonNumber,1);}
+-(void)otherMouseUp:(NSEvent *)e{runtime_input_mouse_button((unsigned)e.buttonNumber,0);}
+-(void)rightMouseDragged:(NSEvent *)e{runtime_input_mouse_motion(e.deltaX,e.deltaY);}
 @end
 @interface TOTKShortcutHelp:NSView
 @property(strong) NSTextField *label;
@@ -247,8 +258,14 @@ static void front_sync_drawable(void){
 -(void)applicationDidBecomeActive:(NSNotification *)n{(void)n;display_presentation();}
 -(void)applicationDidResignActive:(NSNotification *)n{(void)n;display_presentation();}
 #endif
--(void)windowDidBecomeKey:(NSNotification *)n{(void)n;atomic_store(&focused,1);runtime_oe_push_message(15);fprintf(stderr,"[totk] window gained focus\n");}
--(void)windowDidResignKey:(NSNotification *)n{(void)n;atomic_store(&focused,0);runtime_input_clear();runtime_oe_push_message(15);fprintf(stderr,"[totk] window lost focus\n");}
+-(void)windowDidBecomeKey:(NSNotification *)n{(void)n;atomic_store(&focused,1);
+#ifndef GAME_BOTW
+ if(!displaySettings.window.sheetParent)runtime_input_suspend(0);
+#else
+ runtime_input_suspend(0);
+#endif
+ runtime_oe_push_message(15);fprintf(stderr,"[totk] window gained focus\n");}
+-(void)windowDidResignKey:(NSNotification *)n{(void)n;atomic_store(&focused,0);runtime_input_suspend(1);runtime_oe_push_message(15);fprintf(stderr,"[totk] window lost focus\n");}
 /* The process ends with the window. Save writes go straight to the files (runtime/fs_host.c), so a close in the middle of a
    save waits (up to 15 s, the window already gone) until the game has written and committed it (runtime_fs_save_busy). */
 -(void)windowWillClose:(NSNotification *)n{(void)n;
@@ -301,7 +318,7 @@ void runtime_front_run(void(*callback)(void)){
   [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
   runtime_gamepad_start();
 #ifndef GAME_BOTW
-  if(!controlsLoaded)display_load();
+  if(!controlsLoaded)display_load();display_input_load();
 #endif
   /* Default window: the docked output size, 1920x1080, scaled down (16:9 kept) when the screen's visible area is smaller. */
   /* TOTK_WINDOW_SIZE=<w>x<h> (test scripts only, e.g. the 2K output test; the desktop launcher never sets it): another starting size. */

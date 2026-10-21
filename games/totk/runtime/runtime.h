@@ -158,3 +158,14 @@ int runtime_controls_handle_key(unsigned code,unsigned modifiers);
 void runtime_front_control_test(const char *command);
 int runtime_render_configure(unsigned w,unsigned h,int quality);
 uint64_t runtime_render_applied(void);
+
+#include "input_bindings.h"
+void runtime_input_bindings_get(RuntimeKeyboardBindings *bindings);
+int runtime_input_bindings_set(const RuntimeKeyboardBindings *bindings);
+void runtime_input_mouse_button(unsigned button,int down);
+void runtime_input_mouse_motion(double dx,double dy);
+void runtime_input_suspend(int suspended); /* sheet/capture/focus: releases every input source */
+int runtime_input_suspended(void);
+/* Controller configuration is updated on the main thread, as are GC events. */
+void runtime_gamepad_bindings_get(RuntimeControllerBindings *bindings);
+int runtime_gamepad_bindings_set(const RuntimeControllerBindings *bindings);

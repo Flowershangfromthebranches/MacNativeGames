@@ -2,7 +2,8 @@
 
 Open **Game Controls…** from the application's menu, click **Game Controls** in
 the game window, or press **F1** / **Command+,**. This replaces the passive
-shortcut reminder. The menu has Graphics, Frame Rate and Shortcuts tabs.
+shortcut reminder. The menu has Graphics, Frame Rate, Shortcuts, Keyboard & Mouse and Controller tabs.
+See [game input bindings](input-bindings.md) for the two input pages.
 Apply saves changes; Cancel discards the draft. Full screen uses a separate
 macOS Space; borderless fills the current desktop; windowed restores the prior
 window frame. No option changes the physical display mode.
@@ -44,12 +45,8 @@ constants, plus the number of successfully encoded MetalFX frames. A requested
 checkbox alone is not treated as execution evidence. New scaler configurations
 build in the background; the game's existing upscale is retained until ready.
 
-Antialiasing currently preserves the game's FXAA. TAA/temporal scaling is shown
-as unavailable because this port does not yet provide validated per-object motion
-vectors and projection jitter. It is not emulated by renaming spatial scaling.
-Apple documents [spatial and temporal scaling](https://developer.apple.com/documentation/MetalFX)
-as distinct paths; [temporal AA and scaling](https://developer.apple.com/videos/play/wwdc2022/10103/)
-requires motion, depth and jittered color inputs.
+Antialiasing follows the current upstream FXAA/TAA path. The menu exposes the
+existing TAA switch and retains plain key 5 for compatibility.
 
 ## Frame controls
 
@@ -83,45 +80,16 @@ no explicit cap, and frame generation off. Prior window mode is retained.
 
 ## Focused verification
 
-- `test_control_policy.py`: actual pixel-count reductions, valid dimensions and
-  independent Vsync/limiter periods (including both disabled).
-- `frontend_display_probe.m`: production AppKit controls with guest stubs; actual
-  Apply actions, mode transitions, aspect ratio, validation, cancel, preferences
-  and unchanged physical display pixels. No game data or Metal commands.
-- Real-game save-copy evidence, logs and generated files are external under
-  `MacNativeGames/TOTK/tests/control-menu-20261019` and the artifacts development
-  directory. A user-takeover run is retained separately and not counted as a pass.
+- `test_control_policy.py`: render dimensions and independent Vsync/limiter periods.
+- `test_control_input.py`: production input dispatch and guest controller samples.
+- `frontend_display_probe.m`: production AppKit display controls with guest stubs;
+  Apply, mode transitions, aspect ratio, validation, Cancel and preferences.
+- [Input binding probes](input-bindings.md#core-verification) cover the added pages.
 
-Local 1.0.0 / Apple M3 validation on 2026-10-19: all 42 source tests and the
-AppKit core probe passed. A real save-copy run completed 10 live combinations,
-including native 720p/1080p/1440p, the three 1080p upscale presets, caps of 30 and
-40, both pacing controls off, and frame generation with an explicit real-frame
-cap. Game constants matched every selected scene/canvas pair; MetalFX counters
-increased in every enabled upscale stage. The Vsync-off stages reported
-`displaySyncEnabled=0`. Frame generation produced 296 extra frames for 300 real
-frames in the recorded sample. The run exited normally, with no GPU fault,
-FATAL or translation failure. Representative screenshots were visually reviewed.
-These are focused behavior checks with a warm cache, not a controlled FPS
-benchmark or a long-session stability claim. All 51 formal profile file hashes,
-including 25 `.sav` files, matched the pre-test snapshot.
+This branch integrates the unmerged #42 control menu onto current main and adds
+game input bindings. It retains the compact performance panel, `TOTK_HUD=corners`,
+`TOTK_STRETCH`, ultrawide camera/HUD path, and the iOS embedded-code guards.
+Headless probes and iOS exports do not load macOS menu preferences.
 
-The menu extends the guarded four-site render patch already merged from
-[upstream PR #19](https://github.com/ly05010419/MacNativeGames/pull/19). Its live
-layout refresh uses the 1.4.3 display-config flag; the iOS embedded-code guards
-remain unchanged. The 1.4.3 patch and
-frontend passed syntax checks only; no 1.4.3 game execution was performed.
-
-## Upstream integration
-
-The PR is based on main `7c8e9dd`. It retains the compact performance panel,
-`TOTK_HUD=corners`, `TOTK_STRETCH`, the ultrawide camera/HUD path and key 4 (now
-also configurable), and the iOS embedded-code guards. Headless probes, startup
-verification and iOS exports do not load the macOS menu preferences.
-
-On this rebased branch, the two control-policy/input regression checks, three
-work-directory checks, the AppKit core probe and a full 1.0.0 runtime compile
-passed. The AppKit probe also checks the preserved compact panel, five shortcut
-actions and the wide presentation frame without changing drawable pixels.
-The game-run results above describe the earlier installed local build; they
-were not repeated on this rebased branch. 1.4.3 game execution, iOS execution
-and long-session/FPS benchmarks remain unverified.
+Per-platform build and play evidence is reported in the pull request; probes
+are not a substitute for running each supported game version.

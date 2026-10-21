@@ -7,7 +7,11 @@ int runtime_controls_active(void){return active;}
 int runtime_controls_handle_key(unsigned c,unsigned m){if(active&&c==binding&&m==bindingMods){actions++;return 1;}return 0;}
 void runtime_survey_cancel_user(void){}
 void runtime_autoload_user_input(void){userNotices++;}
-uint64_t runtime_now_ns(void){return 1000000000;}
+static uint64_t testNow=1000000000;
+uint64_t runtime_now_ns(void){return testNow;}
+static RuntimeGamepadState testPad;
+void runtime_gamepad_read(RuntimeGamepadState *p){*p=testPad;}
+int runtime_handheld_mode(void){return 0;}
 void runtime_gamepad_clear(void){}
 void taa_toggle(void){legacyTAA++;}
 void runtime_shortcut_help_toggle(void){legacyOverlay++;}
@@ -51,5 +55,28 @@ int main(void){
   runtime_input_key_synthetic(legacy[i],1);runtime_input_key_synthetic(legacy[i],1);runtime_input_key_synthetic(legacy[i],0);
  }
  assert(legacyOverlay==1&&legacyFI==1&&legacyOutput==1&&legacyAspect==1);
- puts("PASS: exact modifiers, held keys, consumed controller input, takeover notification, legacy fallbacks");
+ runtime_input_clear();initialize();uint32_t id=0;NpadState state;
+ RuntimeKeyboardBindings b,original;runtime_input_bindings_get(&b);original=b;assert(input_bindings_valid(&b));
+ runtime_input_key(38,1);full_states(&state,1,&id);assert(state.buttons==1);runtime_input_key(38,0);
+ runtime_input_key(49,1);full_states(&state,1,&id);assert(state.buttons==2);runtime_input_key(49,0);
+ runtime_input_key(13,1);full_states(&state,1,&id);assert(state.ly==32767);runtime_input_clear();
+ b.source[0][0]=12;b.source[1][0]=129;assert(runtime_input_bindings_set(&b));
+ runtime_input_key(38,1);full_states(&state,1,&id);assert(!state.buttons);runtime_input_clear();
+ runtime_input_key(11,1);full_states(&state,1,&id);assert(state.buttons==1);runtime_input_key(11,0);full_states(&state,1,&id);assert(!state.buttons);
+ runtime_input_mouse_button(0,1);full_states(&state,1,&id);assert(state.buttons==2);runtime_input_mouse_button(0,0);
+ runtime_input_key(49,1);full_states(&state,1,&id);assert(state.buttons==2);runtime_input_key(49,0);full_states(&state,1,&id);assert(!state.buttons);
+ runtime_input_mouse_button(0,1);runtime_input_mouse_button(0,0);full_states(&state,1,&id);assert(state.buttons==2);full_states(&state,1,&id);assert(!state.buttons);
+ runtime_input_key(11,1);assert(runtime_input_bindings_set(&b));full_states(&state,1,&id);assert(!state.buttons);
+ RuntimeKeyboardBindings bad=b;bad.source[2][0]=b.source[0][0];assert(!runtime_input_bindings_set(&bad));bad=b;bad.source[2][0]=137;assert(!runtime_input_bindings_set(&bad));runtime_input_bindings_get(&bad);assert(!memcmp(&bad,&b,sizeof b));
+ runtime_input_key(0,1);runtime_input_key(2,1);full_states(&state,1,&id);assert(!state.lx);runtime_input_clear();
+ b.mouse_look=1;assert(runtime_input_bindings_set(&b));runtime_input_mouse_motion(10,10);full_states(&state,1,&id);assert(state.rx>0&&state.ry<0);
+ testNow+=81000000;full_states(&state,1,&id);assert(!state.rx&&!state.ry);
+ b.mouse_invert_y=1;assert(runtime_input_bindings_set(&b));runtime_input_mouse_motion(1e6,1e6);full_states(&state,1,&id);assert(state.rx==32767&&state.ry==32767);
+ runtime_input_mouse_motion(0,0);full_states(&state,1,&id);assert(!state.rx&&!state.ry);
+ testPad=(RuntimeGamepadState){.buttons=4,.lx=20000};full_states(&state,1,&id);assert(state.buttons==4&&state.lx==20000);
+ runtime_input_suspend(1);runtime_input_key(11,1);runtime_input_mouse_button(0,1);runtime_input_mouse_motion(99,99);full_states(&state,1,&id);assert(state.attributes==1&&!state.buttons&&!state.lx&&!state.rx&&!state.ry);
+ testPad=(RuntimeGamepadState){0};runtime_input_suspend(0);full_states(&state,1,&id);assert(!state.buttons&&!state.rx);assert(runtime_input_bindings_set(&original));
+ RuntimeControllerBindings c={0};controller_map_default(c.map,c.modes);assert(controller_bindings_valid(&c));c.swap_sticks=1;c.invert_look_y=1;assert(controller_bindings_valid(&c));c.map[0]=3;assert(!controller_bindings_valid(&c));c.map[0]=1;
+ c.modes[0]=CONTROLLER_AIM;assert(!controller_bindings_valid(&c));c.modes[0]=CONTROLLER_AIM|(1<<3);assert(controller_bindings_valid(&c));c.modes[0]=CONTROLLER_AIM|(31<<3);assert(!controller_bindings_valid(&c));
+ puts("PASS: exact modifiers, held keys, keyboard/mouse remapping, axes, suspension, validation and legacy shortcuts");
 }
