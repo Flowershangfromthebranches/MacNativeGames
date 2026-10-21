@@ -14,6 +14,7 @@ int main(void){@autoreleasepool{
  [window makeKeyAndOrderFront:nil];displaySettings=[TOTKDisplaySettings new];[displaySettings showSettings:nil];
  assert(front_modifier_down(56,NX_DEVICELSHIFTKEYMASK)&&!front_modifier_down(60,NX_DEVICELSHIFTKEYMASK));
  assert(front_modifier_down(60,NX_DEVICERSHIFTKEYMASK)&&!front_modifier_down(56,NX_DEVICERSHIFTKEYMASK));
+ TOTKWindowDelegate *delegate=[TOTKWindowDelegate new];[delegate windowDidResignKey:[NSNotification notificationWithName:NSWindowDidResignKeyNotification object:window]];assert(probeSuspended);
  assert(displaySettings.tabs.numberOfTabViewItems==5&&probeSuspended);TOTKInputSettings *s=displaySettings.inputSettings;assert(s.keyButtons.count==48&&s.targets.count==17);
  RuntimeKeyboardBindings original=probeKeyboard;
  [s record:s.keyButtons[0]];assert(s.monitor);NSEvent *outside=key_event(window,11,0,NO);assert([s captureEvent:outside]==outside&&s.recording==0);
@@ -24,7 +25,7 @@ int main(void){@autoreleasepool{
  [s record:s.keyButtons[0]];[s captureEvent:key_event(s.hostWindow,11,0,NO)];assert(s.keyboard.source[0][0]==12&&!s.monitor&&s.keyboard.mouse_look&&s.keyboard.mouse_sensitivity==175);
  [s record:s.keyButtons[2]];NSEvent *mouse=[NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:s.hostWindow.windowNumber context:nil eventNumber:1 clickCount:1 pressure:1];[s captureEvent:mouse];assert(s.keyboard.source[1][0]==129);
  [s record:s.keyButtons[0]];[displaySettings.tabs selectTabViewItemAtIndex:4];assert(!s.monitor);
- [displaySettings cancelSettings:nil];assert(!probeSuspended&&!memcmp(&original,&probeKeyboard,sizeof original));
+ [displaySettings cancelSettings:nil];assert(!probeSuspended&&!memcmp(&original,&probeKeyboard,sizeof original));[delegate windowDidResignKey:[NSNotification notificationWithName:NSWindowDidResignKeyNotification object:window]];assert(!probeSuspended);
  [displaySettings showSettings:nil];RuntimeKeyboardBindings k=s.keyboard;k.source[0][0]=12;s.keyboard=k;[s refreshKeyboard];
  assert([s validate:displaySettings.draftKeys]);k.source[1][0]=12;s.keyboard=k;assert(![s validate:displaySettings.draftKeys]);
  k.source[1][0]=129;k.source[0][0]=24;s.keyboard=k;assert(![s validate:displaySettings.draftKeys]);k.source[0][0]=19;s.keyboard=k;assert(![s validate:displaySettings.draftKeys]);
