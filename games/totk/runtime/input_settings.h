@@ -32,6 +32,7 @@ static void display_input_load(void){
 @property RuntimeKeyboardBindings keyboard;
 @property RuntimeControllerBindings controller;
 @property(weak) NSWindow *hostWindow;
+@property(weak) NSView *keyboardTab;
 @property(weak) NSTextField *error;
 @property(strong) NSArray<NSButton *> *keyButtons;
 @property(strong) NSArray<NSPopUpButton *> *targets,*modes,*fires;
@@ -68,6 +69,12 @@ static NSView *input_scroll(NSView *parent,CGFloat height,CGFloat top){NSScrollV
   if(e.modifierFlags&(NSEventModifierFlagCommand|NSEventModifierFlagControl)){self.error.stringValue=@(TOTK_UI("游戏绑定使用单键；组合键请在“快捷键”页设置。","Use a single game key; configure chords in Shortcuts."));return nil;}
   [self captureSource:e.keyCode+1];return nil;}
  if(e.type==NSEventTypeFlagsChanged){if(front_modifier_down(e.keyCode,e.modifierFlags))[self captureSource:e.keyCode+1];return nil;}
+ // Keep tab navigation, Apply/Cancel, clear buttons and other controls usable
+ // while recording. Only the selected binding or blank page area captures a click.
+ NSPoint point=[self.keyboardTab convertPoint:e.locationInWindow fromView:nil];
+ if(!NSPointInRect(point,self.keyboardTab.bounds)){[self stopRecording];return e;}
+ NSView *hit=[self.hostWindow.contentView hitTest:[self.hostWindow.contentView convertPoint:e.locationInWindow fromView:nil]];
+ for(NSView *v=hit;v&&v!=self.keyboardTab;v=v.superview)if([v isKindOfClass:NSControl.class]&&v!=self.keyButtons[self.recording]){[self stopRecording];return e;}
  if(e.buttonNumber>=0&&e.buttonNumber<INPUT_MOUSE_BUTTONS){[self captureSource:INPUT_KEYS+1+(unsigned)e.buttonNumber];return nil;}return e;
 }
 
@@ -78,7 +85,7 @@ static NSView *input_scroll(NSView *parent,CGFloat height,CGFloat top){NSScrollV
  _controller.modes[i]=(uint8_t)(kind|(kind==CONTROLLER_AIM?self.fires[i].indexOfSelectedItem<<3:0));self.fires[i].enabled=kind==CONTROLLER_AIM;
 }
 -(void)addKeyboardTab:(NSTabView *)tabs{
- NSView *tab=controls_tab(tabs,@(TOTK_UI("键盘与鼠标","Keyboard & Mouse")));
+ NSView *tab=controls_tab(tabs,@(TOTK_UI("键盘与鼠标","Keyboard & Mouse")));self.keyboardTab=tab;
  controls_hint(tab,@(TOTK_UI("每个动作可设两个按键。点按钮后按键或鼠标；Esc 取消录入，× 清除。","Two bindings per action. Click, then press a key or mouse button; Esc cancels; × clears.")),352,35);
  NSView *rows=input_scroll(tab,INPUT_ACTIONS*32+8,110);NSMutableArray *buttons=[NSMutableArray new];NSArray *titles=input_action_titles();
  for(int i=0;i<INPUT_ACTIONS;i++){CGFloat y=(INPUT_ACTIONS-1-i)*32+4;NSTextField *label=[NSTextField labelWithString:titles[i]];label.frame=NSMakeRect(8,y+4,120,22);[rows addSubview:label];
