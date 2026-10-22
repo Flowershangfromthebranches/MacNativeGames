@@ -1,10 +1,11 @@
 # Game input bindings (macOS)
 
-Open **Game Controls…** with F1 or Command+, and select **Keyboard & Mouse** or
-**Controller**. This extends the control menu introduced in PR #42. The keyboard/controller editor configures the host controller presented to
-Tears of the Kingdom. The separate Player Actions page patches the verified
-player-operation dispatcher in memory; neither editor changes game files, saves
-or the game's own options.
+Open **Game Controls…** with F1 or Command+, and use **Keyboard**, **Controller**,
+**Actions** or **Buttons** (tabs: 键鼠 / 手柄 / 动作 / 全局). This extends the control
+menu introduced in PR #42. Keyboard/Controller configure the physical devices;
+All Buttons remaps the 16 buttons the game finally sees (menus included); Player
+Actions patches the verified player-operation dispatcher for gameplay only.
+None of the editors changes game files, saves or the game's own options.
 
 ## Keyboard and mouse
 
@@ -29,24 +30,49 @@ also be bound to a game button (for example ZL). Mouse look does not lock or hid
 the cursor. It is off by default; the existing keyboard defaults and aliases
 (Space for B, Escape for Minus) are retained.
 
-## Player Actions: gameplay without changing menus
+## Player Actions (tab: Actions / 动作): gameplay without changing menus
 
-On the verified **TOTK 1.0.0 Mac** runtime, use **Player Actions** to assign logical
-A/X/Y to Interact, Jump, Attack or Unassigned. B retains its original running
-behavior. The example button selects **A jumps, X attacks, Y interacts**; menus,
-dialogue and maps still receive the unchanged confirm/return buttons. Apply is
-live and persistent; Cancel leaves current actions unchanged. Keyboard/mouse and
-controllers share the same action map.
+On the verified **TOTK 1.0.0 Mac** runtime, use **Player Actions** to assign any
+of the 16 gameplay sources — A, B, X, Y, L, R, ZL, ZR, D-pad
+up/down/left/right, L/R-stick clicks, Plus and Minus — to Unassigned, Interact, Cancel/Run,
+Jump, Attack, Ability, Throw, Shield/Aim, Bow, Quick select up/down/left/right,
+Crouch, Scope, Pause/Inventory or Map. The example button selects **A jumps, X attacks, Y interacts**;
+menus, dialogue and maps still receive the buttons the game sees from the other
+pages. Apply is live and persistent; Cancel leaves current actions unchanged.
+Keyboard/mouse and controllers share the same action map. Held actions and attack/ability releases
+follow the newly assigned source, including stick clicks.
 
-The Controller page still maps physical controls to Switch buttons and therefore
-affects menus too. With Xbox, first select the Xbox preset so physical A/B/X/Y
-match the logical letters, then configure the separate player actions. Existing
-custom raw bindings are preserved. In-world action prompts still show original
-Nintendo icons; other scene-specific interaction paths may need separate work.
-Unsupported versions, iOS/export builds and instruction guard failures retain
-original actions and disable the action page. Only the verified A/X/Y player
-operation sites are changed; ZL/ZR, shields, throwing and abilities are not
-individually validated. See [action-bindings.md](action-bindings.md).
+The Controller page maps physical controls to Switch buttons and therefore
+affects menus too. All Buttons is applied after the Controller map; leave it at
+defaults when you only want Player Actions to differ from menus. With Xbox,
+first select the Xbox preset so physical A/B/X/Y match the logical letters, then
+configure the separate player actions. Existing custom raw bindings are
+preserved. In-world action prompts still show original Nintendo icons; other
+scene-specific interaction paths may need separate work. Unsupported versions,
+iOS/export builds and instruction guard failures retain original actions and
+disable the action page. See [action-bindings.md](action-bindings.md).
+
+## All Buttons (tab: Buttons / 全局): the complete 16-button map
+
+**All Buttons** is the final map of the 16 Switch buttons the game receives. It
+runs after the keyboard and controller layouts, so it changes menus, dialogue,
+maps and gameplay together. Use this page when you also want to change menu navigation. For independent
+gameplay bindings, including Plus/Minus, use Player Actions. Each of A, B, X, Y,
+L3, R3, L, R, ZL, ZR, Plus, Minus, D-pad left/up/right/down selects one game
+button or Unassigned; two sources may select the same target.
+
+Think of the order as **physical/keyboard → Controller & Keyboard pages → All
+Buttons → game → Player Actions (gameplay only)**. For example, leave All
+Buttons at defaults and use Player Actions for a gameplay-only swap; or put
+A↔B in All Buttons to swap menus too, then use Player Actions if you want those
+game-visible buttons to do something else in gameplay.
+
+All Buttons is implemented in the macOS runtime on the Npad state; it works on
+every supported game version and does not touch guest code. Home/Capture are
+system buttons and are not part of the game's FullKey mask. Static UI labels
+such as "Select A" / "Return B" are game text: the button behavior changes, but
+the printed letter may not. Player Actions is restricted to the verified 1.0.0
+Mac build.
 
 ## Controller
 
@@ -69,7 +95,9 @@ per-device profile switching: the selected preset applies to connected pads.
 Choosing a preset resets its buttons, modes (Hold), stick swap and Y inversion
 in the draft. Custom preserves the current draft. Manual edits mark it Custom.
 The preset selector and fire-button labels follow the selected controller family.
-The target column names the raw Switch buttons; Player Actions separately determines their gameplay behavior.
+The target column names the raw Switch buttons; All Buttons then remaps those
+Switch buttons globally, and Player Actions separately determines their gameplay
+behavior.
 Existing saved bindings stay unchanged and initially show Custom. Preset identity
 is stored separately as `controllerPresetV1`; a missing, malformed or mismatching
 identity never overwrites the saved binding array. Cancel discards preset changes.
@@ -104,7 +132,15 @@ While the sheet is open, game input is neutral. Applying or leaving the sheet
 clears keyboard/mouse presses, controller pulses and toggles; held controller
 buttons must be released and sticks centered before they resume.
 
-Player actions use a separate playerActionBindingsV1 array. Without a valid saved array, TOTK_ACTION_LAYOUT=xbox remains compatible with the original local proof of concept; otherwise actions default to Interact/Jump/Attack. Saved actions override that environment fallback.
+All Buttons uses `allButtonBindingsV1` (16 targets, 255 = Unassigned). Player
+actions use `playerActionBindingsV3` (16 sources x 17 codes); valid legacy
+`playerActionBindingsV2` arrays of 14 entries migrate with default Plus/Minus.
+Valid `playerActionBindingsV1` arrays of three A/X/Y entries are loaded when V3/V2 are absent
+and saved as V3 on Apply. Malformed, fractional and overflowing values are ignored. Without
+a valid saved array, `TOTK_ACTION_LAYOUT=xbox` remains compatible with the
+original local proof of concept; otherwise actions default to the original
+layout. Saved actions override that environment fallback. `TOTK_BUTTON_MAP` is a
+diagnostic 16-value override for All Buttons.
 
 The versioned input preferences live in the existing
 `org.macnativegames.totk.display` preferences suite. A saved controller layout
@@ -124,14 +160,20 @@ input configuration and touch controls.
   the actual AppKit editor and run the production controller state transitions
   with synthetic physical states (hold/tap/toggle/aim, swap/invert, neutral gates).
 - On a logged-in Mac, set `TOTK_RUN_APPKIT_PROBES=1` for the same command to run
-  actual controls, recording scope, Apply/Cancel/reset and preference reload.
-  The probe uses only a test preferences suite and no guest, saves or GPU work.
+  actual controls, recording scope, Apply/Cancel/reset and preference reload for
+  keyboard, controller, Player Actions and All Buttons. The probe uses only a
+  test preferences suite and no guest, saves or GPU work.
+- In-game device evidence (2026-10-22): run7 swapped Plus/Minus and observed the
+  pause menu/map swap; run8 applied A/B live and observed map Return/Select and
+  B's sprint action. Screenshots and console logs are in the external
+  `tests/semantic-input-20261021/run7` and `run8` directories.
 
-These probes do not constitute physical-controller or in-game play testing.
+These probes do not constitute physical-controller testing; the run7/run8
+screenshots and logs are the in-game evidence.
 
 ## 中文使用说明
 
-按 F1 或 Command+, 打开控制菜单，进入“键盘与鼠标”或“手柄”。键鼠每个动作可设
+按 F1 或 Command+, 打开控制菜单，进入“键鼠”“手柄”“动作”或“全局”页。键鼠每个动作可设
 两个绑定，点击后按键或鼠标按钮；Esc 取消录入，× 清除。重复绑定、快捷键冲突会在
 应用前提示。可开启按住鼠标右键拖动视角，并调整灵敏度、反转 Y。
 
@@ -147,9 +189,22 @@ Xbox 按字母对应；PlayStation 用 × 确认、○ 返回、△ 跳跃、□
 保持中立，关闭后需松开手柄按钮、将摇杆回中再继续。菜单保存的手柄配置会覆盖启动时
 读取的 controls.txt，文件本身不变。
 
-### 场景动作与菜单分开绑定
+### 三层绑定与“所有按键”
 
-在“手柄”页选设备预设（Xbox 手柄选 Xbox），使菜单 A 确认、B 返回。
-再进入“游戏动作”，选择“A 跳跃 · X 攻击 · Y 交互”，或逐项设置，点击应用。
-B 保持原游戏的奔跑行为。键鼠和手柄共用这组动作，取消不会修改当前布局。
-目前仅支持已验证的 1.0.0 Mac；场景内动作提示图标暂时仍显示原版按键。
+按键从设备到游戏依次经过三层：
+
+1. **键盘与鼠标 / 手柄**：实体设备 → Switch 按键。手柄页的映射也会影响菜单。
+2. **全局（All Buttons）**：游戏最终看到的 16 个按键（A/B/X/Y/L3/R3/L/R/ZL/ZR/+/−/
+   十字键）可以逐一改到另一个按键或“未分配”。这一层在设备映射之后执行，
+   所以菜单、对话、地图和场景动作会一起变化，Plus/Minus 也在这里改。
+   两个来源可以指向同一个游戏按键。
+3. **动作（Player Actions）**：只改场景内的 16 个动作来源（A/B/X/Y/L/R/ZL/ZR/十字键/
+   左右摇杆按下、+/−），目标包括交互、取消/奔跑、跳跃、攻击、能力、投掷、
+   盾/瞄准、弓、快捷选择四向、下蹲、望远镜、暂停/背包、地图或未分配。菜单不受这一层影响。
+
+例如：想保留菜单 A 确认/B 返回、只让场景里 A 跳跃，就保持“全局”默认，
+在“动作”里设置。想连菜单一起交换 A/B，就在“全局”里把 A→B、B→A；
+此时菜单的确认/返回也会互换。全局修改后，“动作”页的来源名称指的是
+游戏最终看到的按键，两层可以叠加。静态提示文字（如地图底部的 Select A /
+Return B）是游戏内固定文本，行为会变但文字未必变；Home/截图键由系统处理，
+不在这 16 个按键内。游戏动作层目前仅支持已验证的 1.0.0 Mac。

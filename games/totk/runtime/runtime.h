@@ -170,6 +170,10 @@ int runtime_input_suspended(void);
 void runtime_gamepad_bindings_get(RuntimeControllerBindings *bindings);
 int runtime_gamepad_bindings_set(const RuntimeControllerBindings *bindings);
 
+#include "button_bindings.h"
+void runtime_button_bindings_get(RuntimeButtonBindings *bindings);
+int runtime_button_bindings_set(const RuntimeButtonBindings *bindings);
+
 #include "action_bindings.h"
 void runtime_action_bindings_get(RuntimeActionBindings *bindings);
 int runtime_action_bindings_set(const RuntimeActionBindings *bindings);

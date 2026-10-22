@@ -11,11 +11,21 @@
 #include <strings.h>
 #include <stdatomic.h>
 /* Player actions are separate from raw controller/UI input. The loader installs
-   immutable veneers, then publishes the writable atomic configuration word. */
-static _Atomic uint32_t actionRequest=0x841;
-static _Atomic(uint32_t *) actionPage;
+   an immutable translator. A sequence-checked table publishes coherent layouts. */
+static RuntimeActionBindings actionRequest;
+typedef struct { _Atomic uint32_t sequence;uint32_t reserved;_Atomic uint16_t target[ACTION_BINDING_COUNT]; } ActionLive;
+_Static_assert(offsetof(ActionLive,target)==8&&sizeof(ActionLive)==40,"guest action table ABI");
+static _Atomic(ActionLive *) actionPage;
+/* The mutex serializes writers. Odd/even sequence numbers let guest readers
+   retry a live update without taking a native lock or changing executable code. */
+static void action_publish(ActionLive *page,const RuntimeActionBindings *b){
+ atomic_fetch_add_explicit(&page->sequence,1,memory_order_acq_rel);
+ for(unsigned i=0;i<ACTION_BINDING_COUNT;i++)atomic_store_explicit(&page->target[i],b->target[i],memory_order_relaxed);
+ atomic_fetch_add_explicit(&page->sequence,1,memory_order_release);
+}
 static _Atomic int actionPatchFailed;
 static pthread_once_t actionOnce=PTHREAD_ONCE_INIT;
+static pthread_mutex_t actionLock=PTHREAD_MUTEX_INITIALIZER;
 static int action_version_supported(void){
 #if TARGET_OS_OSX && !defined(GAME_BOTW) && !defined(GAME_BOTW160) && !defined(TOTK_GAME_V112) && !defined(TOTK_GAME_V121) && !defined(TOTK_GAME_V143)
  return getenv("TOTK_EXPORT_IOS")==NULL;
@@ -23,22 +33,41 @@ static int action_version_supported(void){
  return 0;
 #endif
 }
-static void action_initialize(void){
- const char *e=getenv("TOTK_ACTION_LAYOUT");if(!action_version_supported()||!e||!*e||!strcasecmp(e,"switch")||!strcmp(e,"0"))return;
- if(!strcasecmp(e,"xbox"))atomic_store(&actionRequest,0x184);
- else fprintf(stderr,"[totk] unknown TOTK_ACTION_LAYOUT; player actions keep the original layout\n");
+static int action_parse_map(const char *s,RuntimeActionBindings *b){
+ action_bindings_default(b);
+ for(unsigned i=0;i<ACTION_BINDING_COUNT;i++){
+  char *end;unsigned long v=strtoul(s,&end,0);
+  if(end==s||v>0xffff||!action_binding_code_valid((uint16_t)v))return 0;
+  b->target[i]=(uint16_t)v;
+  if(i+1<ACTION_BINDING_COUNT){if(!*end&&i==13)return 1;if(*end!=',')return 0;s=end+1;}
+  else if(*end)return 0;
+ }
+ return 1;
 }
-void runtime_action_bindings_get(RuntimeActionBindings *b){pthread_once(&actionOnce,action_initialize);*b=action_bindings_unpack(atomic_load(&actionRequest));}
+static void action_initialize(void){
+ action_bindings_default(&actionRequest);if(!action_version_supported())return;
+ const char *e=getenv("TOTK_ACTION_LAYOUT");
+ if(e&&*e&&strcasecmp(e,"switch")&&strcmp(e,"0")){
+  if(!strcasecmp(e,"xbox"))action_bindings_xbox(&actionRequest);
+  else fprintf(stderr,"[totk] unknown TOTK_ACTION_LAYOUT; player actions keep the original layout\n");
+ }
+ const char *m=getenv("TOTK_ACTION_MAP");
+ if(m&&*m){RuntimeActionBindings b=actionRequest;if(action_parse_map(m,&b))actionRequest=b;else fprintf(stderr,"[totk] TOTK_ACTION_MAP ignored: expected 16 (or legacy 14) comma-separated action codes\n");}
+}
+void runtime_action_bindings_get(RuntimeActionBindings *b){pthread_once(&actionOnce,action_initialize);pthread_mutex_lock(&actionLock);*b=actionRequest;pthread_mutex_unlock(&actionLock);}
 int runtime_action_bindings_available(void){return atomic_load(&actionPage)!=NULL;}
 int runtime_action_bindings_set(const RuntimeActionBindings *b){
- if(!action_version_supported()||atomic_load(&actionPatchFailed)||!action_bindings_valid(b))return 0;
- pthread_once(&actionOnce,action_initialize);uint32_t n=action_bindings_pack(b);atomic_store(&actionRequest,n);
- uint32_t *page=atomic_load(&actionPage);if(page)atomic_store((_Atomic uint32_t *)page,n);
- runtime_input_clear();fprintf(stderr,"[totk] player actions: raw A=%s, X=%s, Y=%s; B runs, menu A/B unchanged\n",action_binding_name(b->target[0]),action_binding_name(b->target[1]),action_binding_name(b->target[2]));return 1;
+ if(!b||!action_version_supported()||atomic_load(&actionPatchFailed)||!action_bindings_valid(b))return 0;
+ pthread_once(&actionOnce,action_initialize);pthread_mutex_lock(&actionLock);actionRequest=*b;
+ ActionLive *page=atomic_load(&actionPage);if(page)action_publish(page,b);
+ pthread_mutex_unlock(&actionLock);runtime_input_clear();
+ fprintf(stderr,"[totk] player actions: A=%s B=%s X=%s Y=%s L=%s R=%s ZL=%s ZR=%s Up=%s Down=%s Left=%s Right=%s LStick=%s RStick=%s Plus=%s Minus=%s\n",action_binding_name(b->target[0]),action_binding_name(b->target[1]),action_binding_name(b->target[2]),action_binding_name(b->target[3]),action_binding_name(b->target[4]),action_binding_name(b->target[5]),action_binding_name(b->target[6]),action_binding_name(b->target[7]),action_binding_name(b->target[8]),action_binding_name(b->target[9]),action_binding_name(b->target[10]),action_binding_name(b->target[11]),action_binding_name(b->target[12]),action_binding_name(b->target[13]),action_binding_name(b->target[14]),action_binding_name(b->target[15]));return 1;
 }
 void runtime_action_bindings_attach(void *word){
- if(!word){pthread_once(&actionOnce,action_initialize);atomic_store(&actionRequest,0x841);atomic_store(&actionPage,NULL);atomic_store(&actionPatchFailed,1);return;}
- pthread_once(&actionOnce,action_initialize);atomic_store((_Atomic uint32_t *)word,atomic_load(&actionRequest));atomic_store(&actionPage,word);
+ if(!word){pthread_once(&actionOnce,action_initialize);pthread_mutex_lock(&actionLock);action_bindings_default(&actionRequest);atomic_store(&actionPage,NULL);atomic_store(&actionPatchFailed,1);pthread_mutex_unlock(&actionLock);return;}
+ pthread_once(&actionOnce,action_initialize);pthread_mutex_lock(&actionLock);
+ ActionLive *page=word;action_publish(page,&actionRequest);
+ atomic_store(&actionPage,page);pthread_mutex_unlock(&actionLock);
 }
 typedef struct{int64_t sampling;uint64_t buttons;int32_t lx,ly,rx,ry;uint32_t attributes,pad;} NpadState;
 _Static_assert(sizeof(NpadState)==40,"Npad full-key ABI");
@@ -47,13 +76,47 @@ static unsigned char keys[INPUT_SOURCES];static uint64_t pending;
 static uint32_t styles=1;static bool enabled,allowed=true;static int holdType;
 static int64_t sample;static uint64_t padSeen;
 static RuntimeKeyboardBindings inputBindings;
+static RuntimeButtonBindings buttonBindings;
+static pthread_once_t buttonOnce=PTHREAD_ONCE_INIT;
 static int inputBindingsLoaded,inputSuspended;
 static int32_t mouseRX,mouseRY;static uint64_t mouseLast;
 static void bindings_init(void){if(!inputBindingsLoaded){input_bindings_default(&inputBindings);inputBindingsLoaded=1;}}
+static int button_parse_map(const char *s,RuntimeButtonBindings *b){
+ RuntimeButtonBindings next;
+ for(unsigned i=0;i<BUTTON_BINDING_COUNT;i++){
+  char *end;long v=strtol(s,&end,0);
+  if(end==s||v< -1||v>=BUTTON_BINDING_COUNT)return 0;
+  next.target[i]=v<0?BUTTON_BINDING_NONE:(uint8_t)v;
+  if(i+1<BUTTON_BINDING_COUNT){if(*end!=',')return 0;s=end+1;}
+  else if(*end)return 0;
+ }
+ if(!button_bindings_valid(&next))return 0;*b=next;return 1;
+}
+static void button_initialize(void){
+ button_bindings_default(&buttonBindings);
+ const char *m=getenv("TOTK_BUTTON_MAP");
+ if(m&&*m){
+  RuntimeButtonBindings b;
+  if(button_parse_map(m,&b)){
+   buttonBindings=b;
+   fprintf(stderr,"[totk] all buttons:");
+   for(unsigned i=0;i<BUTTON_BINDING_COUNT;i++)fprintf(stderr," %s->%s",button_binding_name(i),buttonBindings.target[i]==BUTTON_BINDING_NONE?"none":button_binding_name(buttonBindings.target[i]));
+   fprintf(stderr,"\n");
+  }else fprintf(stderr,"[totk] TOTK_BUTTON_MAP ignored: expected 16 comma-separated indices (0-15 or -1 for none)\n");
+ }
+}
 static uint64_t button(unsigned code){bindings_init();uint64_t result=0;for(unsigned i=0;i<16;i++)for(unsigned j=0;j<2;j++)if(inputBindings.source[i][j]==code+1)result|=1ULL<<i;return result;}
 static int bound_down(unsigned action){for(unsigned j=0;j<2;j++){unsigned s=inputBindings.source[action][j];if(s&&keys[s-1])return 1;}return 0;}
 void runtime_input_bindings_get(RuntimeKeyboardBindings *b){pthread_mutex_lock(&inputLock);bindings_init();*b=inputBindings;pthread_mutex_unlock(&inputLock);}
 int runtime_input_bindings_set(const RuntimeKeyboardBindings *b){if(!input_bindings_valid(b))return 0;pthread_mutex_lock(&inputLock);inputBindings=*b;inputBindingsLoaded=1;pthread_mutex_unlock(&inputLock);runtime_input_clear();return 1;}
+void runtime_button_bindings_get(RuntimeButtonBindings *b){pthread_once(&buttonOnce,button_initialize);pthread_mutex_lock(&inputLock);*b=buttonBindings;pthread_mutex_unlock(&inputLock);}
+int runtime_button_bindings_set(const RuntimeButtonBindings *b){
+ if(!b||!button_bindings_valid(b))return 0;
+ pthread_once(&buttonOnce,button_initialize);pthread_mutex_lock(&inputLock);buttonBindings=*b;pthread_mutex_unlock(&inputLock);runtime_input_clear();
+ fprintf(stderr,"[totk] all buttons:");
+ for(unsigned i=0;i<BUTTON_BINDING_COUNT;i++)fprintf(stderr," %s->%s",button_binding_name(i),b->target[i]==BUTTON_BINDING_NONE?"none":button_binding_name(b->target[i]));
+ fprintf(stderr,"\n");return 1;
+}
 int runtime_input_suspended(void){pthread_mutex_lock(&inputLock);int s=inputSuspended;pthread_mutex_unlock(&inputLock);return s;}
 void runtime_input_suspend(int suspended){pthread_mutex_lock(&inputLock);inputSuspended=!!suspended;pthread_mutex_unlock(&inputLock);runtime_input_clear();}
 void runtime_input_mouse_motion(double dx,double dy){
@@ -129,12 +192,13 @@ static int pad_states(NpadState *out,int max,const uint32_t *id,uint32_t want_st
 static int full_states(NpadState *out,int max,const uint32_t *id){return pad_states(out,max,id,1);}
 static int handheld_states(NpadState *out,int max,const uint32_t *id){return pad_states(out,max,id,2);}
 static int pad_states(NpadState *out,int max,const uint32_t *id,uint32_t want_style){if(max<=0)return 0;if(id)input_log(want_style==2?"handheld state":"full-key state",*id);if(!out||!id)runtime_fail("controller output pointer");pthread_mutex_lock(&inputLock);NpadState state={.sampling=++sample};if(enabled&&allowed&&*id==pad_id()&&want_style==pad_style()&&(styles&want_style)){
- bindings_init();
+ bindings_init();pthread_once(&buttonOnce,button_initialize);
  state.attributes=1;if(inputSuspended){*out=state;pthread_mutex_unlock(&inputLock);return 1;}for(unsigned i=0;i<INPUT_SOURCES;i++)if(keys[i])state.buttons|=button(i);state.buttons|=pending;pending=0;
  state.lx=32767*(bound_down(INPUT_RIGHT)-bound_down(INPUT_LEFT));state.ly=32767*(bound_down(INPUT_UP)-bound_down(INPUT_DOWN));
  state.rx=32767*(bound_down(INPUT_LOOK_RIGHT)-bound_down(INPUT_LOOK_LEFT));state.ry=32767*(bound_down(INPUT_LOOK_UP)-bound_down(INPUT_LOOK_DOWN));
  uint64_t now=runtime_now_ns();if(mouseLast&&now>=mouseLast&&now-mouseLast<80000000ULL){if(abs(mouseRX)>abs(state.rx))state.rx=mouseRX;if(abs(mouseRY)>abs(state.ry))state.ry=mouseRY;}
  RuntimeGamepadState pad;runtime_gamepad_read(&pad);state.buttons|=pad.buttons;
+ state.buttons=button_bindings_apply(&buttonBindings,state.buttons);
  if(pad.buttons&~padSeen||abs(pad.lx)>16384||abs(pad.ly)>16384||abs(pad.rx)>16384||abs(pad.ry)>16384)user_input("controller");padSeen=pad.buttons;
  if(abs(pad.lx)>abs(state.lx))state.lx=pad.lx;if(abs(pad.ly)>abs(state.ly))state.ly=pad.ly;
  if(abs(pad.rx)>abs(state.rx))state.rx=pad.rx;if(abs(pad.ry)>abs(state.ry))state.ry=pad.ry;
@@ -295,6 +359,14 @@ static void *input_file(void *arg) {
 #endif
         } else if (!strcmp(line, "threads\n")) {   /* every guest thread's wait state and guest return chain, now (a hang: what is each thread waiting for) */
             runtime_dump_threads();
+        } else if (!strncmp(line,"actions ",8)) {   /* diagnostic live player layout, 16 action codes */
+            RuntimeActionBindings b;line[strcspn(line,"\r\n")]=0;
+            if(!action_parse_map(line+8,&b))runtime_fail("actions needs 16 (or legacy 14) comma-separated action codes");
+            if(!runtime_action_bindings_set(&b))fprintf(stderr,"[totk] diagnostic player actions rejected\n");
+        } else if (!strncmp(line,"buttons ",8)) {   /* "buttons <16 targets>": apply the final FullKey remap live */
+            RuntimeButtonBindings b; line[strcspn(line,"\r\n")]=0;
+            if(!button_parse_map(line+8,&b))runtime_fail("buttons needs 16 comma-separated indices (0-15 or -1 for none)");
+            runtime_button_bindings_set(&b);
         } else if (!strncmp(line,"control ",8)) { if(runtime_front_control_test)runtime_front_control_test(line+8);
         } else if (!strcmp(line, "close\n")) { runtime_front_request_close(); break; }
         else runtime_fail("invalid diagnostic input command");

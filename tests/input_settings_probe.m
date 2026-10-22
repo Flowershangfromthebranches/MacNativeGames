@@ -12,10 +12,11 @@ int main(void){@autoreleasepool{
  display_load();NSString *suite=@"org.macnativegames.totk.display.tests";[displayDefaults removePersistentDomainForName:suite];display_load();
  window=[[TOTKGameWindow alloc] initWithContentRect:NSMakeRect(100,100,900,600) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
  [window makeKeyAndOrderFront:nil];displaySettings=[TOTKDisplaySettings new];[displaySettings showSettings:nil];
+ [NSApp activateIgnoringOtherApps:YES];[NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
  assert(front_modifier_down(56,NX_DEVICELSHIFTKEYMASK)&&!front_modifier_down(60,NX_DEVICELSHIFTKEYMASK));
  assert(front_modifier_down(60,NX_DEVICERSHIFTKEYMASK)&&!front_modifier_down(56,NX_DEVICERSHIFTKEYMASK));
  TOTKWindowDelegate *delegate=[TOTKWindowDelegate new];[delegate windowDidResignKey:[NSNotification notificationWithName:NSWindowDidResignKeyNotification object:window]];assert(probeSuspended);
- assert(displaySettings.tabs.numberOfTabViewItems==6&&probeSuspended);TOTKInputSettings *s=displaySettings.inputSettings;assert(s.keyButtons.count==48&&s.targets.count==17);[displaySettings.tabs selectTabViewItemAtIndex:3];
+ assert(displaySettings.tabs.numberOfTabViewItems==7&&probeSuspended);TOTKInputSettings *s=displaySettings.inputSettings;assert(s.keyButtons.count==48&&s.targets.count==17&&s.buttonTargets.count==BUTTON_BINDING_COUNT);[displaySettings.tabs selectTabViewItemAtIndex:3];
  RuntimeKeyboardBindings original=probeKeyboard;
  [s record:s.keyButtons[0]];assert(s.monitor);NSEvent *outside=key_event(window,11,0,NO);assert([s captureEvent:outside]==outside&&s.recording==0);
  [s captureEvent:key_event(s.hostWindow,11,0,YES)];assert(s.recording==0);
@@ -69,15 +70,49 @@ int main(void){@autoreleasepool{
  [displayDefaults setInteger:CONTROLLER_PRESET_XBOX forKey:@"controllerPresetV1"];[displaySettings showSettings:nil];assert(s.preset.indexOfSelectedItem==CONTROLLER_PRESET_CUSTOM);[displaySettings cancelSettings:nil];
  // Player actions are an independent draft; changing them must not change menu button mappings.
  [displaySettings showSettings:nil];RuntimeControllerBindings menuBefore=probeController;RuntimeActionBindings actionsBefore=probeActions;
- [s examplePlayerActions:nil];assert(s.playerActions.target[0]==ACTION_JUMP);assert(action_bindings_pack(&probeActions)==action_bindings_pack(&actionsBefore));
- [displaySettings cancelSettings:nil];assert(action_bindings_pack(&probeActions)==action_bindings_pack(&actionsBefore));
+ [s examplePlayerActions:nil];assert(s.playerActions.target[0]==ACTION_JUMP);assert(action_bindings_equal(&probeActions,&actionsBefore));
+ [displaySettings cancelSettings:nil];assert(action_bindings_equal(&probeActions,&actionsBefore));
  [displaySettings showSettings:nil];[s examplePlayerActions:nil];[displaySettings applySettings:nil];
- assert(probeActions.target[0]==ACTION_JUMP&&probeActions.target[1]==ACTION_ATTACK&&probeActions.target[2]==ACTION_INTERACT);
+ assert(probeActions.target[0]==ACTION_JUMP&&probeActions.target[1]==ACTION_CANCEL&&probeActions.target[2]==ACTION_ATTACK&&probeActions.target[3]==ACTION_INTERACT);
  assert(controller_bindings_equal(&menuBefore,&probeController));action_bindings_default(&probeActions);display_input_load();assert(probeActions.target[0]==ACTION_JUMP);
- [displaySettings showSettings:nil];assert(s.actionTargets[0].indexOfSelectedItem==2);[s resetPlayerActions:nil];[displaySettings cancelSettings:nil];assert(probeActions.target[0]==ACTION_JUMP);
+ [displaySettings showSettings:nil];assert(s.actionTargets[0].indexOfSelectedItem==3);[s resetPlayerActions:nil];[displaySettings cancelSettings:nil];assert(probeActions.target[0]==ACTION_JUMP);
  [displaySettings showSettings:nil];[s resetPlayerActions:nil];probeRejectActions=1;[displaySettings applySettings:nil];assert(displaySettings.window.sheetParent&&s.error.stringValue.length);assert(controller_bindings_equal(&menuBefore,&probeController));probeRejectActions=0;[displaySettings cancelSettings:nil];
- RuntimeActionBindings badActions;assert(!input_player_action_decode(@[@2,@4,@8],&badActions));assert(!input_player_action_decode(@[@1,@4],&badActions));
- [displayDefaults setObject:@[@2,@4,@8] forKey:@"playerActionBindingsV1"];display_input_load();assert(probeActions.target[0]==ACTION_JUMP);
+ RuntimeActionBindings badActions;assert(!input_player_action_decode(@[@2,@4,@8],&badActions));assert(!input_player_action_decode(@[@1,@4],&badActions));NSMutableArray *badActionValues=[NSMutableArray array];for(int i=0;i<ACTION_BINDING_COUNT;i++)[badActionValues addObject:@(ACTION_NONE)];badActionValues[0]=@3;assert(!input_player_action_decode(badActionValues,&badActions));
+ [displayDefaults removeObjectForKey:@"playerActionBindingsV3"];[displayDefaults setObject:@[@4,@8,@1] forKey:@"playerActionBindingsV1"];display_input_load();assert(probeActions.target[0]==ACTION_JUMP&&probeActions.target[2]==ACTION_ATTACK&&probeActions.target[3]==ACTION_INTERACT);
+ // Migrate the previous 14-source layout; newly exposed Plus/Minus keep UI defaults.
+ [displayDefaults removeObjectForKey:@"playerActionBindingsV3"];
+ NSArray *legacyV2=[[input_player_action_values(&probeActions) subarrayWithRange:NSMakeRange(0,14)] copy];
+ [displayDefaults setObject:legacyV2 forKey:@"playerActionBindingsV2"];display_input_load();
+ assert(probeActions.target[14]==ACTION_PAUSE&&probeActions.target[15]==ACTION_MAP&&probeActions.target[0]==ACTION_JUMP);
+ [displayDefaults removeObjectForKey:@"playerActionBindingsV2"];
+ // Fractions, negative/wrapped values and malformed legacy arrays must be ignored.
+ NSMutableArray *validActionValues=[input_player_action_values(&probeActions) mutableCopy];
+ for(NSNumber *bad in @[@1.5,@(-1),@4294967297ULL]){validActionValues[0]=bad;assert(!input_player_action_decode(validActionValues,&badActions));}
+ [displayDefaults removeObjectForKey:@"playerActionBindingsV3"];[displayDefaults setObject:@[@4,@3,@1] forKey:@"playerActionBindingsV1"];
+ RuntimeActionBindings beforeBad=probeActions;display_input_load();assert(action_bindings_equal(&beforeBad,&probeActions));
+ // Every action row can change, apply, persist and cancel; raw menu bindings stay put.
+ [displaySettings showSettings:nil];assert(s.actionTargets.count==ACTION_BINDING_COUNT);
+ for(unsigned i=0;i<ACTION_BINDING_COUNT;i++){[s.actionTargets[i] selectItemAtIndex:(i+2)%ACTION_BINDING_CODE_COUNT];[s playerActionChanged:s.actionTargets[i]];}
+ RuntimeActionBindings allRows=s.playerActions;[displaySettings applySettings:nil];assert(action_bindings_equal(&allRows,&probeActions));assert(controller_bindings_equal(&menuBefore,&probeController));
+ action_bindings_default(&probeActions);display_input_load();assert(action_bindings_equal(&allRows,&probeActions));
+ [displaySettings showSettings:nil];[s resetPlayerActions:nil];[displaySettings cancelSettings:nil];assert(action_bindings_equal(&allRows,&probeActions));
  probeActionsUnavailable=1;[displaySettings showSettings:nil];assert(!s.actionTargets[0].enabled&&!s.actionExample.enabled);[displaySettings cancelSettings:nil];probeActionsUnavailable=0;
- [displayDefaults removePersistentDomainForName:suite];[window orderOut:nil];puts("PASS: capture scope, keyboard/mouse/controller drafts, validation, apply/cancel/reset and preference reload");
+ // All Buttons: a global 16-button draft that survives Apply and reload.
+ [displayDefaults removeObjectForKey:@"allButtonBindingsV1"];button_bindings_default(&probeButtons);display_input_load();
+ [displaySettings showSettings:nil];for(unsigned i=0;i<BUTTON_BINDING_COUNT;i++)assert(s.gameButtons.target[i]==i);
+ [s.buttonTargets[0] selectItemAtIndex:2];[s buttonChanged:s.buttonTargets[0]];assert(s.gameButtons.target[0]==1);
+ RuntimeButtonBindings buttonsBefore=probeButtons;[displaySettings cancelSettings:nil];assert(button_bindings_equal(&buttonsBefore,&probeButtons));
+ [displaySettings showSettings:nil];[s.buttonTargets[0] selectItemAtIndex:2];[s buttonChanged:s.buttonTargets[0]];[s.buttonTargets[11] selectItemAtIndex:0];[s buttonChanged:s.buttonTargets[11]];[displaySettings applySettings:nil];
+ assert(probeButtons.target[0]==1&&probeButtons.target[11]==BUTTON_BINDING_NONE);
+ button_bindings_default(&probeButtons);display_input_load();assert(probeButtons.target[0]==1&&probeButtons.target[11]==BUTTON_BINDING_NONE);
+ [displaySettings showSettings:nil];assert(s.buttonTargets[0].indexOfSelectedItem==2);[s resetAllButtons:nil];[displaySettings cancelSettings:nil];assert(probeButtons.target[0]==1&&probeButtons.target[11]==BUTTON_BINDING_NONE);
+ [displaySettings showSettings:nil];[s resetAllButtons:nil];probeRejectButtons=1;[displaySettings applySettings:nil];assert(displaySettings.window.sheetParent&&s.error.stringValue.length);probeRejectButtons=0;[displaySettings cancelSettings:nil];
+ RuntimeButtonBindings badButtons;assert(!input_button_decode(@[],&badButtons));NSMutableArray *badButtonValues=[input_button_values(&probeButtons) mutableCopy];badButtonValues[0]=@16;assert(!input_button_decode(badButtonValues,&badButtons));badButtonValues[0]=@255;assert(input_button_decode(badButtonValues,&badButtons));
+ for(NSNumber *bad in @[@1.5,@(-1),@4294967297ULL]){badButtonValues[0]=bad;assert(!input_button_decode(badButtonValues,&badButtons));}
+ // If player actions fail after a global-map change, restore all live input layers.
+ [displaySettings showSettings:nil];RuntimeButtonBindings stableButtons=probeButtons;RuntimeKeyboardBindings stableKeys=probeKeyboard;
+ [s.buttonTargets[3] selectItemAtIndex:2];[s buttonChanged:s.buttonTargets[3]];[s resetPlayerActions:nil];probeRejectActions=1;[displaySettings applySettings:nil];
+ assert(displaySettings.window.sheetParent&&button_bindings_equal(&stableButtons,&probeButtons)&&controller_bindings_equal(&menuBefore,&probeController)&&!memcmp(&stableKeys,&probeKeyboard,sizeof stableKeys));probeRejectActions=0;[displaySettings cancelSettings:nil];
+ if(out){capture_input_tab(5,[@(out) stringByAppendingPathComponent:@"player-actions.png"]);capture_input_tab(6,[@(out) stringByAppendingPathComponent:@"all-buttons.png"]);}
+ [displayDefaults removePersistentDomainForName:suite];[window orderOut:nil];puts("PASS: capture scope, keyboard/mouse/controller/all-buttons drafts, validation, apply/cancel/reset and preference reload");
 }}

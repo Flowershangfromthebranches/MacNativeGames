@@ -48,15 +48,52 @@ static NSString *input_controller_hint(NSInteger preset){
  default:return @(TOTK_UI("这里修改菜单也使用的按键映射；场景动作请到“游戏动作”页设置。预设会重置模式与摇杆选项。","These bindings also affect menus; use Player Actions for gameplay-only changes. Presets reset modes and sticks."));
  }
 }
-static NSArray *input_player_action_values(const RuntimeActionBindings *b){return @[@(b->target[0]),@(b->target[1]),@(b->target[2])];}
+static NSArray *input_player_action_titles(void){
+ return @[@(TOTK_UI("未分配","Unassigned")),@(TOTK_UI("交互","Interact")),@(TOTK_UI("取消 / 奔跑","Cancel / run")),@(TOTK_UI("跳跃","Jump")),@(TOTK_UI("攻击","Attack")),@(TOTK_UI("能力","Ability")),@(TOTK_UI("投掷武器","Throw weapon")),@(TOTK_UI("盾 / 瞄准","Shield / aim")),@(TOTK_UI("弓","Bow")),@(TOTK_UI("快捷选择：上","Quick select: up")),@(TOTK_UI("快捷选择：下","Quick select: down")),@(TOTK_UI("快捷选择：左","Quick select: left")),@(TOTK_UI("快捷选择：右","Quick select: right")),@(TOTK_UI("下蹲","Crouch")),@(TOTK_UI("望远镜 / 右摇杆","Scope / R-stick")),@(TOTK_UI("暂停 / 背包","Pause / inventory")),@(TOTK_UI("地图","Map"))];
+}
+static NSArray *input_player_action_source_titles(void){
+ return @[@"A",@"B",@"X",@"Y",@"L",@"R",@"ZL",@"ZR",@(TOTK_UI("上","Up")),@(TOTK_UI("下","Down")),@(TOTK_UI("左","Left")),@(TOTK_UI("右","Right")),@(TOTK_UI("左摇杆按下","L-stick click")),@(TOTK_UI("右摇杆按下","R-stick click")),@"+",@"−"];
+}
+static NSArray *input_player_action_values(const RuntimeActionBindings *b){
+ NSMutableArray *a=[NSMutableArray arrayWithCapacity:ACTION_BINDING_COUNT];
+ for(unsigned i=0;i<ACTION_BINDING_COUNT;i++)[a addObject:@(b->target[i])];
+ return a;
+}
 static BOOL input_player_action_decode(id values,RuntimeActionBindings *b){
  if(![values isKindOfClass:NSArray.class]||[values count]!=ACTION_BINDING_COUNT)return NO;RuntimeActionBindings next;
- for(unsigned i=0;i<ACTION_BINDING_COUNT;i++){if(!input_number(values[i],0,8))return NO;next.target[i]=[values[i] unsignedIntValue];}
+ for(unsigned i=0;i<ACTION_BINDING_COUNT;i++){if(!input_number(values[i],0,0xffff))return NO;unsigned v=[values[i] unsignedIntValue];if(!action_binding_code_valid((uint16_t)v))return NO;next.target[i]=(uint16_t)v;}
  if(!action_bindings_valid(&next))return NO;*b=next;return YES;
+}
+static NSArray *input_button_values(const RuntimeButtonBindings *b){NSMutableArray *a=[NSMutableArray arrayWithCapacity:BUTTON_BINDING_COUNT];for(unsigned i=0;i<BUTTON_BINDING_COUNT;i++)[a addObject:@(b->target[i])];return a;}
+static BOOL input_button_decode(id values,RuntimeButtonBindings *b){
+ if(![values isKindOfClass:NSArray.class]||[values count]!=BUTTON_BINDING_COUNT)return NO;RuntimeButtonBindings next;
+ for(unsigned i=0;i<BUTTON_BINDING_COUNT;i++){if(!input_number(values[i],0,BUTTON_BINDING_NONE))return NO;unsigned v=[values[i] unsignedIntValue];if(v>=BUTTON_BINDING_COUNT&&v!=BUTTON_BINDING_NONE)return NO;next.target[i]=(uint8_t)v;}
+ if(!button_bindings_valid(&next))return NO;*b=next;return YES;
 }
 static void display_input_load(void){
  RuntimeKeyboardBindings k;RuntimeControllerBindings c;RuntimeActionBindings a;
- if(input_player_action_decode([displayDefaults objectForKey:@"playerActionBindingsV1"],&a)&&!runtime_action_bindings_set(&a))fprintf(stderr,"[totk] saved player actions unsupported by this runtime; original actions retained\n");
+ id saved=[displayDefaults objectForKey:@"playerActionBindingsV3"];
+ if(input_player_action_decode(saved,&a)){if(!runtime_action_bindings_set(&a))fprintf(stderr,"[totk] saved player actions unsupported by this runtime; original actions retained\n");}
+ else if(!saved){
+  id previous=[displayDefaults objectForKey:@"playerActionBindingsV2"];
+  if([previous isKindOfClass:NSArray.class]&&[previous count]==14){
+   NSMutableArray *expanded=[previous mutableCopy];[expanded addObjectsFromArray:@[@(ACTION_PAUSE),@(ACTION_MAP)]];
+   if(input_player_action_decode(expanded,&a))runtime_action_bindings_set(&a);
+  }else if(!previous){
+  id old=[displayDefaults objectForKey:@"playerActionBindingsV1"];
+  if([old isKindOfClass:NSArray.class]&&[old count]==3){
+   static const unsigned map[3]={0,2,3};action_bindings_default(&a);BOOL valid=YES;
+   for(unsigned i=0;i<3;i++){
+    if(!input_number(old[i],0,8)){valid=NO;break;}unsigned v=[old[i] unsignedIntValue];
+    if(v!=0&&v!=ACTION_INTERACT&&v!=ACTION_JUMP&&v!=ACTION_ATTACK){valid=NO;break;}
+    a.target[map[i]]=(uint16_t)v;
+   }
+   if(valid&&!runtime_action_bindings_set(&a))fprintf(stderr,"[totk] saved player actions unsupported by this runtime; original actions retained\n");
+  }
+ }
+ }
+ RuntimeButtonBindings buttons;
+ if(input_button_decode([displayDefaults objectForKey:@"allButtonBindingsV1"],&buttons))runtime_button_bindings_set(&buttons);
  if(input_keyboard_decode([displayDefaults objectForKey:@"keyboardMouseBindingsV1"],&k))runtime_input_bindings_set(&k);
  if(input_controller_decode([displayDefaults objectForKey:@"controllerBindingsV1"],&c))runtime_gamepad_bindings_set(&c);
 }
@@ -64,7 +101,8 @@ static void display_input_load(void){
 @property RuntimeKeyboardBindings keyboard;
 @property RuntimeControllerBindings controller;
 @property RuntimeActionBindings playerActions;
-@property(strong) NSArray<NSPopUpButton *> *actionTargets;
+@property RuntimeButtonBindings gameButtons;
+@property(strong) NSArray<NSPopUpButton *> *actionTargets,*buttonTargets;
 @property(strong) NSTextField *actionHint;
 @property(strong) NSButton *actionOriginal,*actionExample;
 @property(weak) NSWindow *hostWindow;
@@ -82,6 +120,8 @@ static void display_input_load(void){
 -(void)addKeyboardTab:(NSTabView *)tabs;
 -(void)addControllerTab:(NSTabView *)tabs;
 -(void)addActionTab:(NSTabView *)tabs;
+-(void)addAllButtonsTab:(NSTabView *)tabs;
+-(void)refreshAllButtons;
 -(void)beginDraft;
 -(void)stopRecording;
 -(NSEvent *)captureEvent:(NSEvent *)event;
@@ -135,7 +175,7 @@ static NSView *input_scroll(NSView *parent,CGFloat height,CGFloat top){NSScrollV
  _controller.modes[i]=(uint8_t)(kind|(kind==CONTROLLER_AIM?self.fires[i].indexOfSelectedItem<<3:0));self.fires[i].enabled=kind==CONTROLLER_AIM;
 }
 -(void)addKeyboardTab:(NSTabView *)tabs{
- NSView *tab=controls_tab(tabs,@(TOTK_UI("键盘与鼠标","Keyboard & Mouse")));self.keyboardTab=tab;
+ NSView *tab=controls_tab(tabs,@(TOTK_UI("键鼠","Keyboard")));self.keyboardTab=tab;
  controls_hint(tab,@(TOTK_UI("每个动作可设两个按键。点按钮后按键或鼠标；Esc 取消录入，× 清除。","Two bindings per action. Click, then press a key or mouse button; Esc cancels; × clears.")),352,35);
  NSView *rows=input_scroll(tab,INPUT_ACTIONS*32+8,110);NSMutableArray *buttons=[NSMutableArray new];NSArray *titles=input_action_titles();
  for(int i=0;i<INPUT_ACTIONS;i++){CGFloat y=(INPUT_ACTIONS-1-i)*32+4;NSTextField *label=[NSTextField labelWithString:titles[i]];label.frame=NSMakeRect(8,y+4,120,22);[rows addSubview:label];
@@ -169,32 +209,59 @@ static NSView *input_scroll(NSView *parent,CGFloat height,CGFloat top){NSScrollV
  NSButton *reset=[NSButton buttonWithTitle:@(TOTK_UI("恢复手柄默认","Reset controller")) target:self action:@selector(resetController:)];reset.frame=NSMakeRect(20,22,220,28);[tab addSubview:reset];
 }
 -(void)refreshPlayerActions{
- static const unsigned values[]={0,ACTION_INTERACT,ACTION_JUMP,ACTION_ATTACK};BOOL available=runtime_action_bindings_available();
- for(unsigned i=0;i<ACTION_BINDING_COUNT;i++){NSInteger selected=0;for(unsigned j=0;j<4;j++)if(_playerActions.target[i]==values[j])selected=j;[self.actionTargets[i] selectItemAtIndex:selected];self.actionTargets[i].enabled=available;}
+ BOOL available=runtime_action_bindings_available();
+ for(unsigned i=0;i<ACTION_BINDING_COUNT;i++){NSInteger selected=action_binding_code_index(_playerActions.target[i]);[self.actionTargets[i] selectItemAtIndex:selected];self.actionTargets[i].enabled=available;}
  self.actionOriginal.enabled=self.actionExample.enabled=available;
- self.actionHint.stringValue=available?@(TOTK_UI("只修改场景中的角色动作。菜单、对话、地图仍用原来的确认与返回键。\nA/X/Y 指“手柄”页右侧的游戏按键；B 保持奔跑。","Changes player actions only. Menus, dialogue and maps retain confirm/return.\nA/X/Y refer to the Switch buttons in Controller; B keeps running.")):@(TOTK_UI("游戏动作绑定仅支持已验证的 1.0.0 Mac。\n当前版本不支持，或游戏指令校验未通过；保持原版动作。","Player action bindings require the verified 1.0.0 Mac runtime.\nThis version is unsupported or instruction guards failed; original actions are retained."));
+ self.actionHint.stringValue=available?@(TOTK_UI("自定义场景中的全部 16 个按键（含 +/−）；菜单、对话和快捷栏内的原始操作保持不变。\n长按与松开跟随新按键；全局页会同时修改菜单，通常保持默认即可。","Customize all 16 gameplay buttons, including Plus/Minus. Original menu, dialogue and shortcut controls stay unchanged.\nHeld actions and releases follow the new buttons. Leave All Buttons at defaults to retain menu controls.")):@(TOTK_UI("游戏动作绑定仅支持已验证的 1.0.0 Mac。\n当前版本不支持，或游戏指令校验未通过；保持原版动作。","Player action bindings require the verified 1.0.0 Mac runtime.\nThis version is unsupported or instruction guards failed; original actions are retained."));
 }
--(void)playerActionChanged:(NSPopUpButton *)sender{static const unsigned values[]={0,ACTION_INTERACT,ACTION_JUMP,ACTION_ATTACK};NSInteger index=sender.indexOfSelectedItem;if(sender.tag>=0&&sender.tag<ACTION_BINDING_COUNT&&index>=0&&index<4)_playerActions.target[sender.tag]=values[index];self.error.stringValue=@"";}
+-(void)playerActionChanged:(NSPopUpButton *)sender{NSInteger index=sender.indexOfSelectedItem;if(sender.tag>=0&&sender.tag<(NSInteger)ACTION_BINDING_COUNT&&index>=0&&index<(NSInteger)action_binding_code_count())_playerActions.target[sender.tag]=action_binding_code_at((unsigned)index);self.error.stringValue=@"";}
 -(void)resetPlayerActions:(id)sender{(void)sender;action_bindings_default(&_playerActions);[self refreshPlayerActions];self.error.stringValue=@"";}
--(void)examplePlayerActions:(id)sender{(void)sender;_playerActions=(RuntimeActionBindings){{ACTION_JUMP,ACTION_ATTACK,ACTION_INTERACT}};[self refreshPlayerActions];self.error.stringValue=@"";}
+-(void)examplePlayerActions:(id)sender{(void)sender;action_bindings_xbox(&_playerActions);[self refreshPlayerActions];self.error.stringValue=@"";}
 -(void)addActionTab:(NSTabView *)tabs{
- NSView *tab=controls_tab(tabs,@(TOTK_UI("游戏动作","Player Actions")));
- self.actionHint=controls_hint(tab,@"",302,77);NSArray *names=@[@(TOTK_UI("A（原为交互）","A (originally interact)")),@(TOTK_UI("X（原为跳跃）","X (originally jump)")),@(TOTK_UI("Y（原为攻击）","Y (originally attack)"))];NSMutableArray *targets=[NSMutableArray new];
- for(unsigned i=0;i<ACTION_BINDING_COUNT;i++){CGFloat y=253-i*47;controls_label(tab,names[i],y);NSPopUpButton *target=controls_popup(tab,@[@(TOTK_UI("未分配","Unassigned")),@(TOTK_UI("交互","Interact")),@(TOTK_UI("跳跃","Jump")),@(TOTK_UI("攻击","Attack"))],y-3);target.tag=i;target.target=self;target.action=@selector(playerActionChanged:);[targets addObject:target];}self.actionTargets=targets;
- controls_label(tab,@(TOTK_UI("B","B")),111);NSTextField *run=[NSTextField labelWithString:@(TOTK_UI("奔跑（保持原游戏行为）","Run (original game behavior)"))];run.frame=NSMakeRect(218,111,350,25);[tab addSubview:run];
- self.actionOriginal=[NSButton buttonWithTitle:@(TOTK_UI("恢复原版动作","Original actions")) target:self action:@selector(resetPlayerActions:)];self.actionOriginal.frame=NSMakeRect(20,65,180,30);[tab addSubview:self.actionOriginal];
- self.actionExample=[NSButton buttonWithTitle:@(TOTK_UI("A 跳跃 · X 攻击 · Y 交互","A jump · X attack · Y interact")) target:self action:@selector(examplePlayerActions:)];self.actionExample.frame=NSMakeRect(218,65,350,30);[tab addSubview:self.actionExample];
- controls_hint(tab,@(TOTK_UI("键鼠与手柄共用这组动作；点击应用后生效。\n场景内的动作提示图标暂时仍显示原版按键。","Keyboard/mouse and controllers share these actions; click Apply to activate.\nIn-world action prompts still show the original button icons.")),7,49);
+ NSView *tab=controls_tab(tabs,@(TOTK_UI("动作","Actions")));
+ self.actionHint=controls_hint(tab,@"",318,58);
+ NSView *rows=input_scroll(tab,ACTION_BINDING_COUNT*30+8,103);rows.enclosingScrollView.frame=NSMakeRect(12,103,576,210);
+ NSArray *sources=input_player_action_source_titles(),*actions=input_player_action_titles();NSMutableArray *targets=[NSMutableArray new];
+ for(unsigned i=0;i<ACTION_BINDING_COUNT;i++){CGFloat y=(ACTION_BINDING_COUNT-1-i)*30+4;NSTextField *label=[NSTextField labelWithString:sources[i]];label.frame=NSMakeRect(8,y+3,140,22);[rows addSubview:label];
+  NSPopUpButton *target=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(160,y,360,26) pullsDown:NO];[target addItemsWithTitles:actions];target.tag=i;target.target=self;target.action=@selector(playerActionChanged:);[rows addSubview:target];[targets addObject:target];}
+ self.actionTargets=targets;
+ self.actionOriginal=[NSButton buttonWithTitle:@(TOTK_UI("恢复原版动作","Original actions")) target:self action:@selector(resetPlayerActions:)];self.actionOriginal.frame=NSMakeRect(20,62,180,30);[tab addSubview:self.actionOriginal];
+ self.actionExample=[NSButton buttonWithTitle:@(TOTK_UI("A 跳跃 · X 攻击 · Y 交互","A jump · X attack · Y interact")) target:self action:@selector(examplePlayerActions:)];self.actionExample.frame=NSMakeRect(218,62,350,30);[tab addSubview:self.actionExample];
+ controls_hint(tab,@(TOTK_UI("键鼠与手柄共用这组动作；点击应用后生效。\n场景内的动作提示图标暂时仍显示原版按键。","Keyboard/mouse and controllers share these actions; click Apply to activate.\nIn-world prompts still show the original button icons.")),7,49);
+}
+-(void)refreshAllButtons{
+ for(unsigned i=0;i<BUTTON_BINDING_COUNT;i++){uint8_t t=_gameButtons.target[i];[self.buttonTargets[i] selectItemAtIndex:t==BUTTON_BINDING_NONE?0:t+1];}
+}
+-(void)buttonChanged:(NSPopUpButton *)sender{
+ NSInteger index=sender.indexOfSelectedItem;
+ if(sender.tag>=0&&sender.tag<(NSInteger)BUTTON_BINDING_COUNT&&index>=0&&index<=BUTTON_BINDING_COUNT)_gameButtons.target[sender.tag]=index==0?BUTTON_BINDING_NONE:(uint8_t)(index-1);
+ self.error.stringValue=@"";
+}
+-(void)resetAllButtons:(id)sender{(void)sender;button_bindings_default(&_gameButtons);[self refreshAllButtons];self.error.stringValue=@"";}
+-(void)addAllButtonsTab:(NSTabView *)tabs{
+ NSView *tab=controls_tab(tabs,@(TOTK_UI("全局","All Buttons")));
+ controls_hint(tab,@(TOTK_UI("这层映射在键盘与手柄之后，改的是游戏最终看到的 16 个按键；菜单、对话、地图和场景动作都会跟着变。Plus/Minus 也在这里。Home/截图键由系统处理。只想改场景动作时，请保持此页默认并使用“动作”页。","This mapping runs after the keyboard and controller layouts and changes the 16 buttons the game finally sees, so menus, dialogue, maps and gameplay all follow. Plus/Minus are included; Home/Capture stay system-level. Leave this page at defaults and use Actions for gameplay-only changes.")),318,58);
+ NSView *rows=input_scroll(tab,BUTTON_BINDING_COUNT*30+8,103);rows.enclosingScrollView.frame=NSMakeRect(12,103,576,210);
+ NSArray *names=[input_action_titles() subarrayWithRange:NSMakeRange(0,BUTTON_BINDING_COUNT)];
+ NSMutableArray *actions=[NSMutableArray arrayWithObject:@(TOTK_UI("未分配","Unassigned"))];[actions addObjectsFromArray:names];
+ NSMutableArray *targets=[NSMutableArray new];
+ for(unsigned i=0;i<BUTTON_BINDING_COUNT;i++){
+  CGFloat y=(BUTTON_BINDING_COUNT-1-i)*30+4;NSTextField *label=[NSTextField labelWithString:names[i]];label.frame=NSMakeRect(8,y+3,140,22);[rows addSubview:label];
+  NSPopUpButton *target=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(160,y,360,26) pullsDown:NO];[target addItemsWithTitles:actions];target.tag=i;target.target=self;target.action=@selector(buttonChanged:);[rows addSubview:target];[targets addObject:target];}
+ self.buttonTargets=targets;
+ NSButton *reset=[NSButton buttonWithTitle:@(TOTK_UI("恢复原始按键","Original buttons")) target:self action:@selector(resetAllButtons:)];reset.frame=NSMakeRect(20,62,220,30);[tab addSubview:reset];
+ controls_hint(tab,@(TOTK_UI("“未分配”会屏蔽该键。两个来源可以指向同一个游戏按键。\n此页改变后，“动作”页的来源名称指的是游戏最终看到的按键。","Unassigned drops the button. Two sources may select the same game button.\nAfter a change, Actions source names mean the buttons the game finally sees.")),7,49);
 }
 -(void)beginDraft{[self stopRecording];runtime_input_bindings_get(&_keyboard);runtime_gamepad_bindings_get(&_controller);
  id saved=[displayDefaults objectForKey:@"controllerPresetV1"];NSInteger preset=input_number(saved,0,CONTROLLER_PRESET_CUSTOM)?[saved integerValue]:CONTROLLER_PRESET_CUSTOM;
  if(preset<CONTROLLER_PRESET_CUSTOM&&!controller_preset_matches(&_controller,(unsigned)preset))preset=CONTROLLER_PRESET_CUSTOM;
- [self.preset selectItemAtIndex:preset];runtime_action_bindings_get(&_playerActions);[self refreshPlayerActions];[self refreshKeyboard];[self refreshController];self.error.stringValue=@"";}
+ [self.preset selectItemAtIndex:preset];runtime_action_bindings_get(&_playerActions);runtime_button_bindings_get(&_gameButtons);[self refreshPlayerActions];[self refreshAllButtons];[self refreshKeyboard];[self refreshController];self.error.stringValue=@"";}
 -(BOOL)validate:(NSArray<NSNumber *> *)shortcuts{
  _keyboard.mouse_look=self.mouseLook.state==NSControlStateValueOn;_keyboard.mouse_invert_y=self.mouseInvert.state==NSControlStateValueOn;_keyboard.mouse_sensitivity=(int)self.sensitivity.integerValue;
  _controller.swap_sticks=self.swapSticks.state==NSControlStateValueOn;_controller.invert_look_y=self.padInvert.state==NSControlStateValueOn;
+ if(!button_bindings_valid(&_gameButtons)){self.error.stringValue=@(TOTK_UI("全局按键包含无效目标。","All Buttons contains an invalid target."));return NO;}
  RuntimeActionBindings current;runtime_action_bindings_get(&current);
- if(!action_bindings_valid(&_playerActions)||(!runtime_action_bindings_available()&&action_bindings_pack(&_playerActions)!=action_bindings_pack(&current))){self.error.stringValue=@(TOTK_UI("当前运行版本不支持这些游戏动作绑定。","This runtime does not support these player action bindings."));return NO;}
+ if(!action_bindings_valid(&_playerActions)||(!runtime_action_bindings_available()&&!action_bindings_equal(&_playerActions,&current))){self.error.stringValue=@(TOTK_UI("当前运行版本不支持这些游戏动作绑定。","This runtime does not support these player action bindings."));return NO;}
  if(!input_bindings_valid(&_keyboard)){self.error.stringValue=@(TOTK_UI("键鼠绑定重复，请先清除原绑定。","Duplicate keyboard/mouse binding; clear the previous binding first."));return NO;}
  for(int i=0;i<INPUT_ACTIONS;i++)for(int j=0;j<2;j++){uint64_t s=_keyboard.source[i][j];if(!s||s>INPUT_KEYS)continue;
   if(s==24){self.error.stringValue=@(TOTK_UI("5 为时域抗锯齿保留。","5 is reserved for temporal antialiasing."));return NO;}
@@ -202,13 +269,17 @@ static NSView *input_scroll(NSView *parent,CGFloat height,CGFloat top){NSScrollV
  if(!controller_bindings_valid(&_controller)){self.error.stringValue=@(TOTK_UI("手柄 aim 的开火按钮不能是它自身。","An aim binding needs a different physical fire button."));return NO;}self.error.stringValue=@"";return YES;
 }
 -(BOOL)apply{
- RuntimeControllerBindings previous;RuntimeKeyboardBindings previousKeys;RuntimeActionBindings previousActions;runtime_gamepad_bindings_get(&previous);runtime_input_bindings_get(&previousKeys);runtime_action_bindings_get(&previousActions);
+ RuntimeControllerBindings previous;RuntimeKeyboardBindings previousKeys;RuntimeActionBindings previousActions;RuntimeButtonBindings previousButtons;runtime_gamepad_bindings_get(&previous);runtime_input_bindings_get(&previousKeys);runtime_action_bindings_get(&previousActions);runtime_button_bindings_get(&previousButtons);
  if(!runtime_gamepad_bindings_set(&_controller)){self.error.stringValue=@(TOTK_UI("手柄设置未应用，请重试。","Controller settings were not applied; try again."));return NO;}
  if(!runtime_input_bindings_set(&_keyboard)){runtime_gamepad_bindings_set(&previous);self.error.stringValue=@(TOTK_UI("键鼠设置未应用，请重试。","Keyboard/mouse settings were not applied; try again."));return NO;}
- if(action_bindings_pack(&_playerActions)!=action_bindings_pack(&previousActions)&&!runtime_action_bindings_set(&_playerActions)){
-  runtime_gamepad_bindings_set(&previous);runtime_input_bindings_set(&previousKeys);self.error.stringValue=@(TOTK_UI("游戏动作未应用，其他输入设置已还原。","Player actions were not applied; other input settings were restored."));return NO;
+ if(!button_bindings_equal(&_gameButtons,&previousButtons)&&!runtime_button_bindings_set(&_gameButtons)){
+  runtime_gamepad_bindings_set(&previous);runtime_input_bindings_set(&previousKeys);self.error.stringValue=@(TOTK_UI("全局按键未应用，其他输入设置已还原。","All-buttons mapping was not applied; other input settings were restored."));return NO;
  }
- if(runtime_action_bindings_available())[displayDefaults setObject:input_player_action_values(&_playerActions) forKey:@"playerActionBindingsV1"];
+ if(!action_bindings_equal(&_playerActions,&previousActions)&&!runtime_action_bindings_set(&_playerActions)){
+  runtime_gamepad_bindings_set(&previous);runtime_input_bindings_set(&previousKeys);runtime_button_bindings_set(&previousButtons);self.error.stringValue=@(TOTK_UI("游戏动作未应用，其他输入设置已还原。","Player actions were not applied; other input settings were restored."));return NO;
+ }
+ [displayDefaults setObject:input_button_values(&_gameButtons) forKey:@"allButtonBindingsV1"];
+ if(runtime_action_bindings_available())[displayDefaults setObject:input_player_action_values(&_playerActions) forKey:@"playerActionBindingsV3"];
  [displayDefaults setObject:input_keyboard_values(&_keyboard) forKey:@"keyboardMouseBindingsV1"];[displayDefaults setObject:input_controller_values(&_controller) forKey:@"controllerBindingsV1"];
  [displayDefaults setInteger:self.preset.indexOfSelectedItem forKey:@"controllerPresetV1"];return YES;
 }

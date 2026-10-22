@@ -19,6 +19,6 @@ class ControlInput(unittest.TestCase):
             compiled = subprocess.run([compiler, '-std=c11', '-ffunction-sections', '-fdata-sections',
                             '-Wl,-dead_strip', str(source), '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(compiled.returncode, 0, compiled.stderr)
-            env = {k: v for k, v in os.environ.items() if k not in ('TOTK_INPUT_FILE', 'TOTK_INPUT_SCRIPT')}
+            env = {k: v for k, v in os.environ.items() if k not in ('TOTK_INPUT_FILE', 'TOTK_INPUT_SCRIPT', 'TOTK_BUTTON_MAP', 'TOTK_ACTION_MAP', 'TOTK_ACTION_LAYOUT')}
             result = subprocess.run([str(exe)], check=True, capture_output=True, text=True, env=env)
             self.assertIn('PASS:', result.stdout)

@@ -78,5 +78,19 @@ int main(void){
  testPad=(RuntimeGamepadState){0};runtime_input_suspend(0);full_states(&state,1,&id);assert(!state.buttons&&!state.rx);assert(runtime_input_bindings_set(&original));
  RuntimeControllerBindings c={0};controller_map_default(c.map,c.modes);assert(controller_bindings_valid(&c));c.swap_sticks=1;c.invert_look_y=1;assert(controller_bindings_valid(&c));c.map[0]=3;assert(!controller_bindings_valid(&c));c.map[0]=1;
  c.modes[0]=CONTROLLER_AIM;assert(!controller_bindings_valid(&c));c.modes[0]=CONTROLLER_AIM|(1<<3);assert(controller_bindings_valid(&c));c.modes[0]=CONTROLLER_AIM|(31<<3);assert(!controller_bindings_valid(&c));
+ // Exercise the final Npad path for every source/target, neutral and release.
+ RuntimeButtonBindings buttons,gotButtons;button_bindings_default(&buttons);
+ for(unsigned source=0;source<BUTTON_BINDING_COUNT;source++)for(unsigned target=0;target<=BUTTON_BINDING_COUNT;target++){
+  button_bindings_default(&buttons);buttons.target[source]=target==BUTTON_BINDING_COUNT?BUTTON_BINDING_NONE:target;
+  assert(runtime_button_bindings_set(&buttons));testPad=(RuntimeGamepadState){.buttons=1ULL<<source,.lx=12345,.ry=-20000};
+  full_states(&state,1,&id);assert(state.buttons==(target==BUTTON_BINDING_COUNT?0:1ULL<<target));assert(state.lx==12345&&state.ry==-20000);
+  testPad.buttons=0;full_states(&state,1,&id);assert(!state.buttons);
+ }
+ button_bindings_default(&buttons);buttons.target[0]=1;buttons.target[2]=1;assert(runtime_button_bindings_set(&buttons));
+ testPad=(RuntimeGamepadState){.buttons=(1ULL<<2)|(1ULL<<30)};runtime_input_key_synthetic(38,1);full_states(&state,1,&id);assert(state.buttons==(2|(1ULL<<30)));
+ runtime_input_key_synthetic(38,0);full_states(&state,1,&id);assert(state.buttons==(2|(1ULL<<30))); // second source stays held
+ testPad.buttons=0;full_states(&state,1,&id);assert(!state.buttons);
+ buttons.target[0]=16;assert(!runtime_button_bindings_set(&buttons));runtime_button_bindings_get(&gotButtons);assert(gotButtons.target[0]==1);
+ button_bindings_default(&buttons);assert(runtime_button_bindings_set(&buttons));
  puts("PASS: exact modifiers, held keys, keyboard/mouse remapping, axes, suspension, validation and legacy shortcuts");
 }

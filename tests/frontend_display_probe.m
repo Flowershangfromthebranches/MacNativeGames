@@ -6,9 +6,10 @@ void runtime_input_key(unsigned c,int d){(void)c;(void)d;}
 void runtime_input_key_modifiers(unsigned c,int d,unsigned m){(void)c;(void)d;(void)m;}
 static RuntimeKeyboardBindings probeKeyboard;
 static RuntimeControllerBindings probeController;
-static int probeBindingsLoaded,probeSuspended,probeRejectController,probeRejectActions,probeActionsUnavailable;
+static int probeBindingsLoaded,probeSuspended,probeRejectController,probeRejectActions,probeRejectButtons,probeActionsUnavailable;
 static RuntimeActionBindings probeActions;
-static void probe_bindings_init(void){if(!probeBindingsLoaded){input_bindings_default(&probeKeyboard);controller_map_default(probeController.map,probeController.modes);action_bindings_default(&probeActions);probeBindingsLoaded=1;}}
+static RuntimeButtonBindings probeButtons;
+static void probe_bindings_init(void){if(!probeBindingsLoaded){input_bindings_default(&probeKeyboard);controller_map_default(probeController.map,probeController.modes);action_bindings_default(&probeActions);button_bindings_default(&probeButtons);probeBindingsLoaded=1;}}
 void runtime_input_bindings_get(RuntimeKeyboardBindings *b){probe_bindings_init();*b=probeKeyboard;}
 int runtime_input_bindings_set(const RuntimeKeyboardBindings *b){if(!input_bindings_valid(b))return 0;probeKeyboard=*b;return 1;}
 void runtime_gamepad_bindings_get(RuntimeControllerBindings *b){probe_bindings_init();*b=probeController;}
@@ -16,6 +17,8 @@ int runtime_gamepad_bindings_set(const RuntimeControllerBindings *b){if(probeRej
 void runtime_action_bindings_get(RuntimeActionBindings *b){probe_bindings_init();*b=probeActions;}
 int runtime_action_bindings_available(void){return !probeActionsUnavailable;}
 int runtime_action_bindings_set(const RuntimeActionBindings *b){if(probeRejectActions||probeActionsUnavailable||!action_bindings_valid(b))return 0;probeActions=*b;return 1;}
+void runtime_button_bindings_get(RuntimeButtonBindings *b){probe_bindings_init();*b=probeButtons;}
+int runtime_button_bindings_set(const RuntimeButtonBindings *b){if(probeRejectButtons||!button_bindings_valid(b))return 0;probeButtons=*b;return 1;}
 void runtime_input_mouse_button(unsigned b,int d){(void)b;(void)d;}
 void runtime_input_mouse_motion(double x,double y){(void)x;(void)y;}
 void runtime_input_suspend(int s){probeSuspended=s;}

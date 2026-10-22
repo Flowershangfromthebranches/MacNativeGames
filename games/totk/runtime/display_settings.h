@@ -107,7 +107,7 @@ static NSPopUpButton *controls_popup(NSView *v,NSArray *items,CGFloat y){NSPopUp
  if((self=[super initWithWindow:p])){
   p.title=@(TOTK_UI("控制菜单","Game Controls"));p.releasedWhenClosed=NO;p.delegate=self;
   self.tabs=[[NSTabView alloc] initWithFrame:NSMakeRect(20,100,620,425)];[p.contentView addSubview:self.tabs];self.tabs.delegate=self;
-  NSView *graphics=controls_tab(self.tabs,@(TOTK_UI("画面","Graphics")));
+  NSView *graphics=controls_tab(self.tabs,@(TOTK_UI("画面","Video")));
   controls_label(graphics,@(TOTK_UI("目标分辨率","Target resolution")),326);
   self.resolution=controls_popup(graphics,@[@"1280 × 720",@"1600 × 900",@"1920 × 1080",@"2560 × 1440"],322);
   controls_label(graphics,@(TOTK_UI("MetalFX 空间超分","MetalFX spatial upscaling")),273);
@@ -122,7 +122,7 @@ static NSPopUpButton *controls_popup(NSView *v,NSArray *items,CGFloat y){NSPopUp
   controls_label(graphics,@(TOTK_UI("窗口模式","Window mode")),167);
   self.mode=controls_popup(graphics,@[@(TOTK_UI("窗口","Windowed")),@(TOTK_UI("全屏（独立空间）","Full screen (separate Space)")),@(TOTK_UI("无边框窗口","Borderless window"))],163);
   controls_hint(graphics,@(TOTK_UI("分辨率与超分档位共同决定 3D 绘制尺寸。窗口大小只改变显示大小。\n例如：1080p + 质量档，3D 以 1280×720 绘制，再由 MetalFX 重建到 1080p。\n切换档位可能有短暂停顿；系统显示分辨率保持不变。","Resolution and upscale preset determine the actual 3D rendering size. Window size only affects presentation.\n1080p + Quality renders at 1280×720 before MetalFX reconstructs 1080p.\nChanging presets may briefly stall. The system display mode stays unchanged.")),37,100);
-  NSView *frames=controls_tab(self.tabs,@(TOTK_UI("帧率","Frame Rate")));
+  NSView *frames=controls_tab(self.tabs,@(TOTK_UI("帧率","FPS")));
   self.vsync=[NSButton checkboxWithTitle:@(TOTK_UI("垂直同步","Vertical sync")) target:nil action:nil];self.vsync.frame=NSMakeRect(20,316,540,28);[frames addSubview:self.vsync];
   controls_label(frames,@(TOTK_UI("真实帧率上限","Real frame rate limit")),263);
   self.cap=[[NSTextField alloc] initWithFrame:NSMakeRect(218,261,100,27)];[frames addSubview:self.cap];controls_hint(frames,@(TOTK_UI("0 = 不限；可填 15–240 FPS","0 = unlimited; 15–240 FPS")),226,26);
@@ -132,7 +132,7 @@ static NSPopUpButton *controls_popup(NSView *v,NSArray *items,CGFloat y){NSPopUp
   NSMutableArray *buttons=[NSMutableArray new];NSArray *actions=@[@(TOTK_UI("打开控制菜单","Open controls")),@(TOTK_UI("显示 / 隐藏提示","Show / hide overlays")),@(TOTK_UI("开关补帧","Toggle frame generation")),@(TOTK_UI("切换超分档位","Cycle upscale preset")),@(TOTK_UI("切换超宽屏（支持版本）","Toggle ultrawide (supported versions)"))];
   for(int i=0;i<5;i++){CGFloat y=332-i*48;controls_label(keys,actions[i],y);NSButton *b=[NSButton buttonWithTitle:@"" target:self action:@selector(recordShortcut:)];b.frame=NSMakeRect(218,y-3,350,30);b.tag=i;[keys addSubview:b];[buttons addObject:b];}self.hotkeyButtons=buttons;
   controls_hint(keys,@(TOTK_UI("点击右侧按钮，再按要绑定的按键或组合键。Esc 取消录入；Delete 清除。\n⌘, 始终可以打开菜单。快捷键改动在点击“应用”后生效。","Click a button and press a key or chord. Esc cancels recording; Delete clears it.\nCommand+, always opens the menu. Shortcut changes take effect on Apply.")),27,92);
-  self.inputSettings=[TOTKInputSettings new];self.inputSettings.hostWindow=p;[self.inputSettings addKeyboardTab:self.tabs];[self.inputSettings addControllerTab:self.tabs];[self.inputSettings addActionTab:self.tabs];
+  self.inputSettings=[TOTKInputSettings new];self.inputSettings.hostWindow=p;[self.inputSettings addKeyboardTab:self.tabs];[self.inputSettings addControllerTab:self.tabs];[self.inputSettings addActionTab:self.tabs];[self.inputSettings addAllButtonsTab:self.tabs];
   self.status=controls_hint(p.contentView,@"",65,28);self.status.frame=NSMakeRect(26,65,608,30);
   self.error=controls_hint(p.contentView,@"",38,24);self.error.textColor=NSColor.systemRedColor;self.error.frame=NSMakeRect(26,38,605,24);self.error.font=[NSFont systemFontOfSize:11];self.inputSettings.error=self.error;
   NSButton *cancel=[NSButton buttonWithTitle:@(TOTK_UI("取消","Cancel")) target:self action:@selector(cancelSettings:)];cancel.frame=NSMakeRect(444,16,88,32);cancel.keyEquivalent=@"\e";[p.contentView addSubview:cancel];
