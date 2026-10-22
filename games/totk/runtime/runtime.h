@@ -169,3 +169,9 @@ int runtime_input_suspended(void);
 /* Controller configuration is updated on the main thread, as are GC events. */
 void runtime_gamepad_bindings_get(RuntimeControllerBindings *bindings);
 int runtime_gamepad_bindings_set(const RuntimeControllerBindings *bindings);
+
+#include "action_bindings.h"
+void runtime_action_bindings_get(RuntimeActionBindings *bindings);
+int runtime_action_bindings_set(const RuntimeActionBindings *bindings);
+int runtime_action_bindings_available(void); /* verified 1.0.0 Mac patch installed */
+void runtime_action_bindings_attach(void *word); /* loader: writable data, NULL on guard failure */

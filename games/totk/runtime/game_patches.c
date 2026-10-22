@@ -583,6 +583,20 @@ static void patch_slowmo_bounce(Module *m) {
             TOTK_GAME_VERSION, (unsigned long long)stub);
 }
 
+/* The verified 1.0.0 player-operation sites use a live action binding table. Install
+   the same six player-only sites once; changing settings never rewrites RX text. */
+#include "semantic_action_patch.h"
+static void patch_action_layout(Module *m){
+#if TARGET_OS_IPHONE || defined(TOTK_GAME_V112) || defined(TOTK_GAME_V121) || defined(TOTK_GAME_V143)
+ (void)m;
+#else
+ if(getenv("TOTK_EXPORT_IOS"))return;
+ if(!semantic_action_install(m)){runtime_action_bindings_attach(NULL);fprintf(stderr,"[totk] player action bindings unavailable: 1.0.0 instruction/padding guards failed; original layout retained\n");return;}
+ RuntimeActionBindings b;runtime_action_bindings_get(&b);
+ fprintf(stderr,"[totk] player-only action bindings installed (6 guarded sites): raw A=%s, X=%s, Y=%s; B runs; menus/dialogue/map keep raw A/B\n",action_binding_name(b.target[0]),action_binding_name(b.target[1]),action_binding_name(b.target[2]));
+#endif
+}
+
 void runtime_game_patches(Module *m) {
     runtime_survey_init(m);
     const size_t n = sizeof fps60_sites / sizeof fps60_sites[0];
@@ -606,6 +620,7 @@ void runtime_game_patches(Module *m) {
         return;
     }
     patch_pchtxt(m);   /* first: the runtime's own patches check the original words they replace */
+    patch_action_layout(m);
     if (realtime_enabled()) patch_realtime(m);
     else fprintf(stderr,"[totk] real-time frame step off (TOTK_REALTIME=0)\n");
     patch_render_res(m);

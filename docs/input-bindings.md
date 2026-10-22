@@ -1,9 +1,10 @@
 # Game input bindings (macOS)
 
 Open **Game Controls…** with F1 or Command+, and select **Keyboard & Mouse** or
-**Controller**. This extends the control menu introduced in PR #42. The editor
-configures the host controller presented to Tears of the Kingdom; it does not
-modify game code, saves or the game's own options.
+**Controller**. This extends the control menu introduced in PR #42. The keyboard/controller editor configures the host controller presented to
+Tears of the Kingdom. The separate Player Actions page patches the verified
+player-operation dispatcher in memory; neither editor changes game files, saves
+or the game's own options.
 
 ## Keyboard and mouse
 
@@ -28,11 +29,30 @@ also be bound to a game button (for example ZL). Mouse look does not lock or hid
 the cursor. It is off by default; the existing keyboard defaults and aliases
 (Space for B, Escape for Minus) are retained.
 
+## Player Actions: gameplay without changing menus
+
+On the verified **TOTK 1.0.0 Mac** runtime, use **Player Actions** to assign logical
+A/X/Y to Interact, Jump, Attack or Unassigned. B retains its original running
+behavior. The example button selects **A jumps, X attacks, Y interacts**; menus,
+dialogue and maps still receive the unchanged confirm/return buttons. Apply is
+live and persistent; Cancel leaves current actions unchanged. Keyboard/mouse and
+controllers share the same action map.
+
+The Controller page still maps physical controls to Switch buttons and therefore
+affects menus too. With Xbox, first select the Xbox preset so physical A/B/X/Y
+match the logical letters, then configure the separate player actions. Existing
+custom raw bindings are preserved. In-world action prompts still show original
+Nintendo icons; other scene-specific interaction paths may need separate work.
+Unsupported versions, iOS/export builds and instruction guard failures retain
+original actions and disable the action page. Only the verified A/X/Y player
+operation sites are changed; ZL/ZR, shields, throwing and abilities are not
+individually validated. See [action-bindings.md](action-bindings.md).
+
 ## Controller
 
 Select one of four controller presets, then **Apply**:
 
-| Preset | Physical south / east / west / north → Switch buttons | Main actions |
+| Preset | Physical south / east / west / north → Switch buttons | Default gameplay actions and menu controls |
 | --- | --- | --- |
 | Switch | B / A / Y / X | A confirms, B returns, X jumps, Y attacks. |
 | Xbox | A / B / X / Y | A confirms, B returns, X jumps, Y attacks. |
@@ -49,7 +69,7 @@ per-device profile switching: the selected preset applies to connected pads.
 Choosing a preset resets its buttons, modes (Hold), stick swap and Y inversion
 in the draft. Custom preserves the current draft. Manual edits mark it Custom.
 The preset selector and fire-button labels follow the selected controller family.
-The target column always names the Switch buttons delivered to the game.
+The target column names the raw Switch buttons; Player Actions separately determines their gameplay behavior.
 Existing saved bindings stay unchanged and initially show Custom. Preset identity
 is stored separately as `controllerPresetV1`; a missing, malformed or mismatching
 identity never overwrites the saved binding array. Cancel discards preset changes.
@@ -83,6 +103,8 @@ resetting also remains a draft until Apply. Switching tabs stops key recording.
 While the sheet is open, game input is neutral. Applying or leaving the sheet
 clears keyboard/mouse presses, controller pulses and toggles; held controller
 buttons must be released and sticks centered before they resume.
+
+Player actions use a separate playerActionBindingsV1 array. Without a valid saved array, TOTK_ACTION_LAYOUT=xbox remains compatible with the original local proof of concept; otherwise actions default to Interact/Jump/Attack. Saved actions override that environment fallback.
 
 The versioned input preferences live in the existing
 `org.macnativegames.totk.display` preferences suite. A saved controller layout
@@ -118,9 +140,16 @@ Xbox 按字母对应；PlayStation 用 × 确认、○ 返回、△ 跳跃、□
 按 Switch 的按钮位置对应。已有自定义绑定保留，手动更改后显示“自定义”。
 预设会将触发方式恢复为按住，并关闭摇杆交换和 Y 反转；取消不会改变当前配置。
 
-手柄也可按实体按钮位置调整游戏动作，支持原有 hold / tap / toggle / aim 模式，以及
+手柄页也可按实体按钮位置调整原始按键映射（同样影响菜单），支持原有 hold / tap / toggle / aim 模式，以及
 左右摇杆交换、视角 Y 反转。aim 需指定另一个实体按钮开火。
 
 “应用”后生效并保存；“取消”不改当前设置；恢复默认也需应用。打开菜单时游戏输入
 保持中立，关闭后需松开手柄按钮、将摇杆回中再继续。菜单保存的手柄配置会覆盖启动时
 读取的 controls.txt，文件本身不变。
+
+### 场景动作与菜单分开绑定
+
+在“手柄”页选设备预设（Xbox 手柄选 Xbox），使菜单 A 确认、B 返回。
+再进入“游戏动作”，选择“A 跳跃 · X 攻击 · Y 交互”，或逐项设置，点击应用。
+B 保持原游戏的奔跑行为。键鼠和手柄共用这组动作，取消不会修改当前布局。
+目前仅支持已验证的 1.0.0 Mac；场景内动作提示图标暂时仍显示原版按键。

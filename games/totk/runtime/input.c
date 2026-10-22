@@ -8,7 +8,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdatomic.h>
+/* Player actions are separate from raw controller/UI input. The loader installs
+   immutable veneers, then publishes the writable atomic configuration word. */
+static _Atomic uint32_t actionRequest=0x841;
+static _Atomic(uint32_t *) actionPage;
+static _Atomic int actionPatchFailed;
+static pthread_once_t actionOnce=PTHREAD_ONCE_INIT;
+static int action_version_supported(void){
+#if TARGET_OS_OSX && !defined(GAME_BOTW) && !defined(GAME_BOTW160) && !defined(TOTK_GAME_V112) && !defined(TOTK_GAME_V121) && !defined(TOTK_GAME_V143)
+ return getenv("TOTK_EXPORT_IOS")==NULL;
+#else
+ return 0;
+#endif
+}
+static void action_initialize(void){
+ const char *e=getenv("TOTK_ACTION_LAYOUT");if(!action_version_supported()||!e||!*e||!strcasecmp(e,"switch")||!strcmp(e,"0"))return;
+ if(!strcasecmp(e,"xbox"))atomic_store(&actionRequest,0x184);
+ else fprintf(stderr,"[totk] unknown TOTK_ACTION_LAYOUT; player actions keep the original layout\n");
+}
+void runtime_action_bindings_get(RuntimeActionBindings *b){pthread_once(&actionOnce,action_initialize);*b=action_bindings_unpack(atomic_load(&actionRequest));}
+int runtime_action_bindings_available(void){return atomic_load(&actionPage)!=NULL;}
+int runtime_action_bindings_set(const RuntimeActionBindings *b){
+ if(!action_version_supported()||atomic_load(&actionPatchFailed)||!action_bindings_valid(b))return 0;
+ pthread_once(&actionOnce,action_initialize);uint32_t n=action_bindings_pack(b);atomic_store(&actionRequest,n);
+ uint32_t *page=atomic_load(&actionPage);if(page)atomic_store((_Atomic uint32_t *)page,n);
+ runtime_input_clear();fprintf(stderr,"[totk] player actions: raw A=%s, X=%s, Y=%s; B runs, menu A/B unchanged\n",action_binding_name(b->target[0]),action_binding_name(b->target[1]),action_binding_name(b->target[2]));return 1;
+}
+void runtime_action_bindings_attach(void *word){
+ if(!word){pthread_once(&actionOnce,action_initialize);atomic_store(&actionRequest,0x841);atomic_store(&actionPage,NULL);atomic_store(&actionPatchFailed,1);return;}
+ pthread_once(&actionOnce,action_initialize);atomic_store((_Atomic uint32_t *)word,atomic_load(&actionRequest));atomic_store(&actionPage,word);
+}
 typedef struct{int64_t sampling;uint64_t buttons;int32_t lx,ly,rx,ry;uint32_t attributes,pad;} NpadState;
 _Static_assert(sizeof(NpadState)==40,"Npad full-key ABI");
 static pthread_mutex_t inputLock=PTHREAD_MUTEX_INITIALIZER;

@@ -15,7 +15,7 @@ int main(void){@autoreleasepool{
  assert(front_modifier_down(56,NX_DEVICELSHIFTKEYMASK)&&!front_modifier_down(60,NX_DEVICELSHIFTKEYMASK));
  assert(front_modifier_down(60,NX_DEVICERSHIFTKEYMASK)&&!front_modifier_down(56,NX_DEVICERSHIFTKEYMASK));
  TOTKWindowDelegate *delegate=[TOTKWindowDelegate new];[delegate windowDidResignKey:[NSNotification notificationWithName:NSWindowDidResignKeyNotification object:window]];assert(probeSuspended);
- assert(displaySettings.tabs.numberOfTabViewItems==5&&probeSuspended);TOTKInputSettings *s=displaySettings.inputSettings;assert(s.keyButtons.count==48&&s.targets.count==17);[displaySettings.tabs selectTabViewItemAtIndex:3];
+ assert(displaySettings.tabs.numberOfTabViewItems==6&&probeSuspended);TOTKInputSettings *s=displaySettings.inputSettings;assert(s.keyButtons.count==48&&s.targets.count==17);[displaySettings.tabs selectTabViewItemAtIndex:3];
  RuntimeKeyboardBindings original=probeKeyboard;
  [s record:s.keyButtons[0]];assert(s.monitor);NSEvent *outside=key_event(window,11,0,NO);assert([s captureEvent:outside]==outside&&s.recording==0);
  [s captureEvent:key_event(s.hostWindow,11,0,YES)];assert(s.recording==0);
@@ -67,5 +67,17 @@ int main(void){@autoreleasepool{
  // A missing/malformed or stale preset label must never overwrite an existing custom mapping.
  [displayDefaults removeObjectForKey:@"controllerPresetV1"];[displaySettings showSettings:nil];assert(s.preset.indexOfSelectedItem==CONTROLLER_PRESET_CUSTOM);[displaySettings cancelSettings:nil];
  [displayDefaults setInteger:CONTROLLER_PRESET_XBOX forKey:@"controllerPresetV1"];[displaySettings showSettings:nil];assert(s.preset.indexOfSelectedItem==CONTROLLER_PRESET_CUSTOM);[displaySettings cancelSettings:nil];
+ // Player actions are an independent draft; changing them must not change menu button mappings.
+ [displaySettings showSettings:nil];RuntimeControllerBindings menuBefore=probeController;RuntimeActionBindings actionsBefore=probeActions;
+ [s examplePlayerActions:nil];assert(s.playerActions.target[0]==ACTION_JUMP);assert(action_bindings_pack(&probeActions)==action_bindings_pack(&actionsBefore));
+ [displaySettings cancelSettings:nil];assert(action_bindings_pack(&probeActions)==action_bindings_pack(&actionsBefore));
+ [displaySettings showSettings:nil];[s examplePlayerActions:nil];[displaySettings applySettings:nil];
+ assert(probeActions.target[0]==ACTION_JUMP&&probeActions.target[1]==ACTION_ATTACK&&probeActions.target[2]==ACTION_INTERACT);
+ assert(controller_bindings_equal(&menuBefore,&probeController));action_bindings_default(&probeActions);display_input_load();assert(probeActions.target[0]==ACTION_JUMP);
+ [displaySettings showSettings:nil];assert(s.actionTargets[0].indexOfSelectedItem==2);[s resetPlayerActions:nil];[displaySettings cancelSettings:nil];assert(probeActions.target[0]==ACTION_JUMP);
+ [displaySettings showSettings:nil];[s resetPlayerActions:nil];probeRejectActions=1;[displaySettings applySettings:nil];assert(displaySettings.window.sheetParent&&s.error.stringValue.length);assert(controller_bindings_equal(&menuBefore,&probeController));probeRejectActions=0;[displaySettings cancelSettings:nil];
+ RuntimeActionBindings badActions;assert(!input_player_action_decode(@[@2,@4,@8],&badActions));assert(!input_player_action_decode(@[@1,@4],&badActions));
+ [displayDefaults setObject:@[@2,@4,@8] forKey:@"playerActionBindingsV1"];display_input_load();assert(probeActions.target[0]==ACTION_JUMP);
+ probeActionsUnavailable=1;[displaySettings showSettings:nil];assert(!s.actionTargets[0].enabled&&!s.actionExample.enabled);[displaySettings cancelSettings:nil];probeActionsUnavailable=0;
  [displayDefaults removePersistentDomainForName:suite];[window orderOut:nil];puts("PASS: capture scope, keyboard/mouse/controller drafts, validation, apply/cancel/reset and preference reload");
 }}
