@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+#include "action_runtime.h"
 typedef struct{int64_t sampling;uint64_t buttons;int32_t lx,ly,rx,ry;uint32_t attributes,pad;} NpadState;
 _Static_assert(sizeof(NpadState)==40,"Npad full-key ABI");
 static pthread_mutex_t inputLock=PTHREAD_MUTEX_INITIALIZER;

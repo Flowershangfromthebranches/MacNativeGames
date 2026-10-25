@@ -13,6 +13,10 @@ void runtime_input_clear(void){}
 void runtime_input_suspend(int on){(void)on;}
 void runtime_keyboard_layout_set(const uint8_t keys[CONTROLS_KEYS]){(void)keys;}
 void runtime_controller_layout_set(const ControlsLayout *layout){(void)layout;}
+void runtime_action_bindings_get(RuntimeActionBindings *b){action_bindings_default(b);}
+int runtime_action_bindings_set(const RuntimeActionBindings *b){return action_bindings_valid(b);}
+int runtime_action_bindings_available(void){return 0;}
+int runtime_action_bindings_supported(void){return 0;}
 void runtime_gamepad_start(void){}
 int runtime_gamepad_type(int *detected){if(detected)*detected=-1;return 0;}
 int runtime_mouse_enabled(void){return 0;}
