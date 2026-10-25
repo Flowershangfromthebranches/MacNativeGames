@@ -5,7 +5,7 @@ physical binding editor and #42 display/pacing features. It includes both verifi
 1.0.0 and 1.4.3 instruction layouts. It does not replace `controller_map.h`,
 `controls.txt`, main’s mouse mode, or any physical keyboard/controller bindings.
 
-Choose **Player Actions…** in the Mac app menu. The 16 game-visible sources are
+Use the **Actions** page of **Game Controls…** in the Mac app menu ([Game Controls](game-controls.md)). The 16 game-visible sources are
 A/B/X/Y, L/R/ZL/ZR, four D-pad directions, stick clicks and Plus/Minus. Each selects
 one of 17 targets, including Unassigned, Pause/Inventory and Map. For example A
 can jump during gameplay while A continues to confirm in menus. Reset restores

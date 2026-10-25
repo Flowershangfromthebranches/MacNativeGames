@@ -35,25 +35,43 @@ int runtime_aspect_step(void){return -1;}
 float runtime_aspect_now(void){return 0;}
 int taa_enabled(void){return 0;}
 int taa_effective(void){return 0;}
+void runtime_input_key_synthetic(unsigned code,int down){(void)code;(void)down;}
+void runtime_input_host_shortcuts(int on){(void)on;}
+void runtime_game_buttons_set(const uint8_t game[CONTROLS_GAME_BUTTONS]){(void)game;}
+void runtime_mouse_drag(int down){(void)down;}
+int runtime_render_configure(unsigned w,unsigned h,int quality){return totk_control_request(w,h,quality)?2:0;}
+void dm_gfx_set_flag(const char *name,int v){(void)name;(void)v;}
+int dm_gfx_vsync(void){return 1;}
+uint64_t dm_gfx_scene_size(void){return 0;}
+int nvn_uncapped_hz(void){return 120;}
+int nvn_fi_auto_on(void){return 0;}
+uint64_t mfxup_done(int context){(void)context;return 0;}
+void taa_toggle(void){}
+void runtime_keyboard_layout_set(const uint8_t keys[CONTROLS_KEYS]){(void)keys;}
+void runtime_controller_layout_set(const ControlsLayout *layout){(void)layout;}
 
 
 #include "../games/totk/runtime/action_runtime.h"
 #include <assert.h>
 
+static void spin(void){[NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];}
 int main(int argc,char **argv){@autoreleasepool{
  assert(argc==2);NSString *folder=@(argv[1]);NSString *controls=[folder stringByAppendingPathComponent:@"controls.txt"];setenv("TOTK_CONTROLS",controls.fileSystemRepresentation,1);
+ NSString *suite=[NSString stringWithFormat:@"org.macnativegames.probe.%d",getpid()];displayDefaults=[[NSUserDefaults alloc] initWithSuiteName:suite];controlsLoaded=YES;
  RuntimeActionBindings b;runtime_action_bindings_get(&b);assert(!runtime_action_bindings_enabled());
  ActionLive live={0};runtime_action_bindings_attach(&live);assert(runtime_action_bindings_available());
  [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];[NSApp finishLaunching];
  window=[[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,900,700) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];window.releasedWhenClosed=NO;window.contentView=[TOTKInputView new];front_install_menu();
- TOTKActionEditor *editor=actionEditor;[editor open:nil];assert(editor.panel&&editor.targets.count==16&&suspended);
- editor->draft.target[0]=ACTION_JUMP;[editor apply:nil];[NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
- assert(!editor.panel&&!suspended);assert(atomic_load(&live.target[0])==ACTION_JUMP);
+ TOTKGameControls *c=gameControls;[c showSettings:nil];assert(controlsOpen&&c.actionTargets.count==16&&suspended&&c.actionTargets[0].enabled);
+ c->actions.target[0]=ACTION_JUMP;[c applySettings:nil];spin();
+ assert(!controlsOpen&&!suspended);assert(atomic_load(&live.target[0])==ACTION_JUMP);
  NSString *path=[folder stringByAppendingPathComponent:@"player-actions.txt"];NSString *saved=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];assert([saved hasPrefix:@"4,"]);
- [editor open:nil];[editor reset:nil];[editor cancel:nil];[NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+ assert(![[NSFileManager defaultManager] fileExistsAtPath:controls]);   /* unchanged bindings: controls.txt is not created */
+ [c showSettings:nil];[c resetActions:nil];[c cancelSettings:nil];spin();
  assert([[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL] isEqualToString:saved]);
- [editor open:nil];assert([@"external" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL]);[editor apply:nil];assert(editor.panel&&[editor.message.stringValue length]);[editor cancel:nil];[NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+ [c showSettings:nil];c->actions.target[1]=ACTION_JUMP;assert([@"external" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL]);[c applySettings:nil];assert(controlsOpen&&c.error.stringValue.length);[c cancelSettings:nil];spin();
  assert([saved writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
- [editor open:nil];runtime_action_bindings_attach(NULL);[editor apply:nil];assert(editor.panel);assert([[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL] isEqualToString:saved]);[editor cancel:nil];
- puts("PASS: 16-source action editor, live publication, save, cancel/reset, conflict and failed-install refusal");return 0;
+ [c showSettings:nil];runtime_action_bindings_attach(NULL);c->actions.target[1]=ACTION_JUMP;[c applySettings:nil];assert(controlsOpen);assert([[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL] isEqualToString:saved]);[c cancelSettings:nil];
+ [displayDefaults removePersistentDomainForName:suite];
+ puts("PASS: control menu actions page: 16 sources, live publication, save, cancel/reset, conflict and failed-install refusal");return 0;
 }}

@@ -1,4 +1,4 @@
-"""Core shared controls.txt, runtime and editor probes. No retail game data."""
+"""Core shared controls.txt, runtime and control menu probes. No retail game data."""
 import os
 import subprocess
 import tempfile
@@ -13,6 +13,12 @@ class ControlsLayoutTests(unittest.TestCase):
             subprocess.run(['xcrun','clang','-std=c11','-Wall','-Wextra','-Werror',str(ROOT/'tests/test_controls_layout.c'),'-o',str(exe)],check=True,capture_output=True)
             subprocess.run([str(exe)],check=True,capture_output=True)
 
+    def test_control_policy(self):
+        with tempfile.TemporaryDirectory() as folder:
+            exe=Path(folder)/'policy'
+            subprocess.run(['xcrun','clang','-std=c11','-Wall','-Wextra','-Werror',str(ROOT/'tests/test_control_policy.c'),'-o',str(exe)],check=True,capture_output=True)
+            subprocess.run([str(exe)],check=True,capture_output=True)
+
     def test_runtime_input(self):
         with tempfile.TemporaryDirectory() as folder:
             exe=Path(folder)/'input'
@@ -23,10 +29,10 @@ class ControlsLayoutTests(unittest.TestCase):
             self.assertEqual(run.returncode,0,run.stdout+run.stderr)
 
     @unittest.skipUnless(os.environ.get('TOTK_RUN_APPKIT_PROBES')=='1','opt-in native AppKit sheet probe')
-    def test_editor(self):
+    def test_menu(self):
         with tempfile.TemporaryDirectory() as folder:
             exe=Path(folder)/'editor'
-            command=['xcrun','clang','-std=c11','-fobjc-arc','-Wall','-Wextra','-Werror','-Wno-deprecated-declarations','-I'+str(ROOT/'games/totk/third_party/d2r_gfx/gfx/nvn/include'),str(ROOT/'tests/controls_editor_probe.m')]
+            command=['xcrun','clang','-std=c11','-fobjc-arc','-Wall','-Wextra','-Werror','-Wno-deprecated-declarations','-I'+str(ROOT/'games/totk/third_party/d2r_gfx/gfx/nvn/include'),str(ROOT/'tests/game_controls_probe.m')]
             for framework in ['Cocoa','QuartzCore','Metal','CoreVideo']:command+=['-framework',framework]
             build=subprocess.run(command+['-o',str(exe)],capture_output=True,text=True)
             self.assertEqual(build.returncode,0,build.stderr)

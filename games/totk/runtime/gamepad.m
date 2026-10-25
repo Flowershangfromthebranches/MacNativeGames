@@ -24,6 +24,9 @@ static uint64_t pressedEdges;
 static BOOL started;
 static uint16_t controllerMap[CONTROLLER_BUTTONS];
 static uint8_t controllerModes[CONTROLLER_BUTTONS];
+/* controls.txt options (controls_layout.h): controllers' sticks swapped / look Y inverted (gamepadLock), and mouse look's
+   sensitivity and Y over the TOTK_MOUSE_* environment (0: the environment's). */
+static int controllerSwap, controllerInvertY, layoutMouseSensitivity, layoutMouseInvert;
 static uint64_t physicalPrev;
 static uint64_t tapUntil[CONTROLLER_BUTTONS];   /* ns, for tap */
 static int toggleOn[CONTROLLER_BUTTONS];        /* for toggle */
@@ -56,6 +59,8 @@ static void load_controller_map(void) {
     ControlsLayout layout; controls_layout_default(&layout);
     const char *error = NULL; int line = memchr(text, 0, n) ? 1 : controls_layout_parse(text, &layout, &error);
     memcpy(controllerMap, layout.map, sizeof controllerMap); memcpy(controllerModes, layout.modes, sizeof controllerModes);
+    controllerSwap = layout.swap_sticks; controllerInvertY = layout.invert_look_y;
+    layoutMouseSensitivity = layout.mouse_sensitivity; layoutMouseInvert = layout.mouse_invert_y;
     if (line) { fprintf(stderr, "[totk-input] %s line %d: %s\n", path, line, error ? error : "embedded NUL"); runtime_fail("controller layout file"); }
     uint16_t defaults[CONTROLLER_BUTTONS]; uint8_t defaultModes[CONTROLLER_BUTTONS]; controller_map_default(defaults, defaultModes);
     int changed = 0; for (int i = 0; i < CONTROLLER_BUTTONS; i++) changed += controllerMap[i] != defaults[i];
@@ -359,6 +364,8 @@ static void mouse_apply(int on) {   /* start or stop the ticks and the gyro take
                                                          getenv("TOTK_MOUSE_COUNTERWEIGHT"), getenv("TOTK_MOUSE_DECAY"), getenv("TOTK_MOUSE_MIN_DECAY"));
         int gyro = runtime_gyro_enabled() && !(g && !strcmp(g, "0"));
         pthread_mutex_lock(&gamepadLock);
+        if (layoutMouseSensitivity) settings.sensitivity = layoutMouseSensitivity;
+        if (layoutMouseInvert) settings.invert_y = layoutMouseInvert == 2;
         mouseSettings = settings; mouse_look_reset(&mouseLook); mouseRX = mouseRY = 0; mouseGyro = gyro;
         pthread_mutex_unlock(&gamepadLock);
         runtime_motion_mouse(gyro);
@@ -403,8 +410,17 @@ int runtime_mouse_toggle(void) {
     return on;
 }
 
-void runtime_mouse_move(double dx, double dy) {   /* the window, while it holds the pointer */
-    if (!atomic_load(&mouseMode)) return;
+/* controls.txt mouse_drag_look (the window, main thread): while the right button is held outside mouse mode, its
+   drags turn the camera as mouse mode's movement does; the pointer stays the player's and no button reaches the game. */
+static _Atomic int mouseDrag;
+void runtime_mouse_drag(int down) {
+    if (atomic_load(&mouseMode) || atomic_load(&mouseDrag) == !!down) return;
+    atomic_store(&mouseDrag, !!down);
+    mouse_apply(down);
+}
+
+void runtime_mouse_move(double dx, double dy) {   /* the window, while it holds the pointer (or a right-button drag looks) */
+    if (!atomic_load(&mouseMode) && !atomic_load(&mouseDrag)) return;
     pthread_mutex_lock(&gamepadLock);
     mouse_look_move(&mouseLook, dx, dy, &mouseSettings);
     pthread_mutex_unlock(&gamepadLock);
@@ -583,6 +599,11 @@ void runtime_gamepad_clear(void) {
 void runtime_controller_layout_set(const ControlsLayout *layout) {
     memcpy(controllerMap,layout->map,sizeof controllerMap);
     memcpy(controllerModes,layout->modes,sizeof controllerModes);
+    pthread_mutex_lock(&gamepadLock);
+    controllerSwap=layout->swap_sticks;controllerInvertY=layout->invert_look_y;
+    layoutMouseSensitivity=layout->mouse_sensitivity;layoutMouseInvert=layout->mouse_invert_y;
+    pthread_mutex_unlock(&gamepadLock);
+    if(atomic_load(&mouseMode))mouse_apply(1);   /* the new sensitivity / Y from now on */
     runtime_mouse_release();runtime_gamepad_clear();
 }
 
@@ -603,6 +624,8 @@ void runtime_gamepad_read(RuntimeGamepadState *out) {
     if (gamepadRawLeftAt && runtime_now_ns() - gamepadRawLeftAt > 250000000ULL) {
         out->lx = gamepadNativeLx; out->ly = gamepadNativeLy;
     }
+    if (controllerSwap) { int32_t x = out->lx, y = out->ly; out->lx = out->rx; out->ly = out->ry; out->rx = x; out->ry = y; }   /* controllers only: before touch and mouse */
+    if (controllerInvertY) out->ry = out->ry == INT32_MIN ? INT32_MAX : -out->ry;
     out->buttons |= touchState.buttons | pressedEdges;
     out->lx = stronger_axis(out->lx, touchState.lx); out->ly = stronger_axis(out->ly, touchState.ly);
     out->rx = stronger_axis(out->rx, touchState.rx); out->ry = stronger_axis(out->ry, touchState.ry);

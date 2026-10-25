@@ -15,7 +15,7 @@ static pthread_mutex_t inputLock=PTHREAD_MUTEX_INITIALIZER;
 static unsigned char keys[128];static uint64_t pending;
 static uint32_t styles=1;static bool enabled,allowed=true;static int holdType;
 static int64_t sample;static uint64_t padSeen;
-static uint8_t keyboardTargets[CONTROLS_KEYS];
+static uint8_t keyboardTargets[CONTROLS_KEYS],gameButtons[CONTROLS_GAME_BUTTONS];
 static pthread_once_t keyboardOnce=PTHREAD_ONCE_INIT;
 static _Atomic int inputSuspended;
 static void keyboard_layout_load(void){
@@ -23,7 +23,11 @@ static void keyboard_layout_load(void){
  FILE *f=path&&*path?fopen(path,"rb"):NULL;
  if(f){char text[16384];size_t n=fread(text,1,sizeof text-1,f);int whole=feof(f);fclose(f);text[n]=0;
   const char *error=NULL;if(!whole||memchr(text,0,n)||controls_layout_parse(text,&b,&error))runtime_fail("invalid controls.txt");}
- memcpy(keyboardTargets,b.keys,sizeof keyboardTargets);
+ memcpy(keyboardTargets,b.keys,sizeof keyboardTargets);memcpy(gameButtons,b.game,sizeof gameButtons);
+}
+/* controls.txt's game_<button> lines: the last layer before the game, after the keyboard and the controllers. */
+void runtime_game_buttons_set(const uint8_t game[CONTROLS_GAME_BUTTONS]){
+ pthread_once(&keyboardOnce,keyboard_layout_load);pthread_mutex_lock(&inputLock);memcpy(gameButtons,game,sizeof gameButtons);pthread_mutex_unlock(&inputLock);runtime_input_clear();
 }
 void runtime_keyboard_layout_set(const uint8_t layout[CONTROLS_KEYS]){
  pthread_once(&keyboardOnce,keyboard_layout_load);pthread_mutex_lock(&inputLock);
@@ -52,7 +56,11 @@ static void user_input(const char *what){
    PlayStation -> Switch (runtime_gamepad_type_cycle, gamepad.m). Key 7 (key code 26) turns mouse mode on / off
    (runtime_mouse_toggle, gamepad.m; the window holds the pointer: frontend.m). Held-key repeats do not cycle. */
 enum { KEY_INTERP_TOGGLE = 19, KEY_OUTPUT_MODE_CYCLE = 20, KEY_ASPECT_TOGGLE = 21, KEY_PAD_TYPE_CYCLE = 22, KEY_TAA_TOGGLE = 23, KEY_MOUSE_TOGGLE = 26 };   /* 21: key 4, 16:9 -> fit to the window -> 21:9 (aspect_patch.h); 22: key 6; 23: key 5, MetalFX temporal anti-aliasing (totk_taa.m) */
-void runtime_input_key_synthetic(unsigned code,int down){if(code>=128||atomic_load(&inputSuspended))return;pthread_once(&keyboardOnce,keyboard_layout_load);pthread_mutex_lock(&inputLock);int press=down&&!keys[code];if(down&&!keys[code])pending|=button(code);keys[code]=(unsigned char)!!down;pthread_mutex_unlock(&inputLock);
+/* The Mac control menu (runtime/game_controls.h) dispatches the shortcuts of window keys itself, so they can be rebound;
+   scripted and auto-load keys (the synthetic entry) keep these fixed ones. */
+static _Atomic int hostShortcuts;
+void runtime_input_host_shortcuts(int on){atomic_store(&hostShortcuts,!!on);}
+static void key_event(unsigned code,int down,int shortcuts){if(code>=128||atomic_load(&inputSuspended))return;pthread_once(&keyboardOnce,keyboard_layout_load);pthread_mutex_lock(&inputLock);int press=down&&!keys[code]&&shortcuts;if(down&&!keys[code])pending|=button(code);keys[code]=(unsigned char)!!down;pthread_mutex_unlock(&inputLock);
  if(press&&code==18){extern void runtime_shortcut_help_toggle(void);runtime_shortcut_help_toggle();}
  if(press&&code==KEY_INTERP_TOGGLE){extern void dm_gfx_set_flag(const char *name,int v);dm_gfx_set_flag("mfx_interp",-1);}
  if(press&&code==KEY_OUTPUT_MODE_CYCLE)runtime_output_mode_cycle();
@@ -60,7 +68,8 @@ void runtime_input_key_synthetic(unsigned code,int down){if(code>=128||atomic_lo
  if(press&&code==KEY_TAA_TOGGLE){extern void taa_toggle(void);taa_toggle();}
  if(press&&code==KEY_PAD_TYPE_CYCLE)runtime_gamepad_type_cycle();
  if(press&&code==KEY_MOUSE_TOGGLE)runtime_mouse_toggle();}
-void runtime_input_key(unsigned code,int down){if(down&&code<128)user_input("keyboard");runtime_input_key_synthetic(code,down);}
+void runtime_input_key_synthetic(unsigned code,int down){key_event(code,down,1);}
+void runtime_input_key(unsigned code,int down){if(down&&code<128)user_input("keyboard");key_event(code,down,!atomic_load(&hostShortcuts));}
 void runtime_input_clear(void){pthread_mutex_lock(&inputLock);memset(keys,0,sizeof(keys));pending=0;pthread_mutex_unlock(&inputLock);runtime_gamepad_clear();}
 static void initialize(void){pthread_mutex_lock(&inputLock);enabled=true;pthread_mutex_unlock(&inputLock);fprintf(stderr,"[totk] native keyboard controller initialized\n");}
 /* Docked: one full-key controller as player 1 (id 0, style bit 0). Handheld (TOTK_OPERATION_MODE=handheld, the iPhone):
@@ -86,6 +95,7 @@ static int pad_states(NpadState *out,int max,const uint32_t *id,uint32_t want_st
  if(pad.buttons&~padSeen||abs(pad.lx)>16384||abs(pad.ly)>16384||abs(pad.rx)>16384||abs(pad.ry)>16384)user_input("controller");padSeen=pad.buttons;
  if(abs(pad.lx)>abs(state.lx))state.lx=pad.lx;if(abs(pad.ly)>abs(state.ly))state.ly=pad.ly;
  if(abs(pad.rx)>abs(state.rx))state.rx=pad.rx;if(abs(pad.ry)>abs(state.ry))state.ry=pad.ry;
+ state.buttons=controls_game_apply(gameButtons,state.buttons);
  }}*out=state;pthread_mutex_unlock(&inputLock);return 1;}
 static int disconnected_states(NpadState *out,int max,const uint32_t *id){if(id)input_log("joy-con state",*id);if(max<=0)return 0;if(!out)runtime_fail("controller output pointer");pthread_mutex_lock(&inputLock);*out=(NpadState){.sampling=++sample};pthread_mutex_unlock(&inputLock);return 1;}
 static void hold_type(int type){if(type<0||type>1)runtime_fail("invalid joy hold type");holdType=type;(void)holdType;}

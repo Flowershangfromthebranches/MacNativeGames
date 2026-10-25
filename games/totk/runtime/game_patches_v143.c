@@ -4,6 +4,7 @@
 #include "game_patches.h"
 #include "game_version.h"
 #include "world_survey.h"
+#include "control_policy.h"
 #include "semantic_action_patch_v143.h"
 #if !TARGET_OS_IPHONE
 #define V143_MAIN_TAIL 0x8000
@@ -36,6 +37,7 @@ static const Patch fps60[] = {
 
 
 static _Atomic uint64_t *frame_step_data;
+static _Atomic uint64_t render_control_request,render_control_applied;   /* the Mac control menu's resolution (runtime_render_configure) */
 static _Atomic uint32_t *frame_interval_data;
 static _Atomic uint32_t pinned_step_us;
 static uint64_t last_present_ns;
@@ -52,13 +54,18 @@ void runtime_frame_step_pin(double ms){
     if(frame_step_data&&us)frame_step_store((float)(us/1e6));
     fprintf(stderr,"[totk] 1.4.3 frame step %s (pin %.3f ms)\n",us?"pinned":"real time",us/1000.0);
 }
+static void render_control_latch(void);
 void runtime_frame_step_update(uint64_t now_ns){
+    render_control_latch();   /* the control menu's resolution, at the present boundary like key 3 */
     if(!frame_step_data||!now_ns)return;
     if(atomic_load_explicit(&pinned_step_us,memory_order_relaxed)){last_present_ns=now_ns;return;}
     if(!last_present_ns){last_present_ns=now_ns;return;}
     double dt=(double)(now_ns-last_present_ns)*1e-9;last_present_ns=now_ns;
     if(dt>0.25||dt<0.001){frame_sample_count=frame_sample_next=0;return;}
-    if(dt<1.0/120.0)dt=1.0/120.0;if(dt>1.0/15.0)dt=1.0/15.0;
+    /* The shortest step is the uncapped clock's ceiling (120 by default; the control menu's limit can raise it to 240),
+       so the game keeps its speed at the frame rates that clock allows. */
+    extern int nvn_uncapped_hz(void);int top=nvn_uncapped_hz();double shortest=1.0/(top>120?top:120);
+    if(dt<shortest)dt=shortest;if(dt>1.0/15.0)dt=1.0/15.0;
     frame_samples[frame_sample_next++%5]=dt;if(frame_sample_count<5)frame_sample_count++;
     double sum=0;for(unsigned i=0;i<frame_sample_count;i++)sum+=frame_samples[i];
     frame_step_store((float)(sum/frame_sample_count));
@@ -375,7 +382,9 @@ int runtime_render_res(unsigned *w,unsigned *h){
 #if TARGET_OS_IPHONE
     (void)w;(void)h;return 0;
 #else
-    return !getenv("TOTK_EXPORT_IOS")&&render_res(w,h);
+    if(getenv("TOTK_EXPORT_IOS"))return 0;
+    if(atomic_load(&render_control_request)){unsigned ow,oh;if(runtime_output_res(&ow,&oh)){*w=ow;*h=oh;}else{*w=1920;*h=1080;}return 1;}   /* as the default: the largest scene */
+    return render_res(w,h);
 #endif
 }
 uint64_t runtime_output_res_extra_bytes(void){
@@ -492,7 +501,12 @@ static void render_res_publish(unsigned canvas_w){
      there (user 2026-10-23: no MetalFX on the phone, as Breath of the Wild): the phone's GPU and memory are at their
      limit; the same size as on the old port (2026-10-16, GPU 24.3 -> 17.3 ms, measured with MetalFX upscaling).
    TOTK_RENDER_RES=<w>x<h> sets a size, =0 the game's own (no patch on the Mac; 1280x720 on the phone). */
+/* The Mac control menu's resolution (runtime_render_configure below): a request saved before the code is patched sets
+   the scene size; the heaps stay those of the canvas-sized default (runtime_render_res), which covers every preset. */
+static unsigned render_boot_w,render_boot_h;static int render_boot_canvas;
 static int render_res(unsigned *w,unsigned *h){
+    uint64_t r=atomic_load(&render_control_request);
+    if(r){*w=(r>>24)&4095;*h=(r>>36)&4095;return 1;}
     const char *e=getenv("TOTK_RENDER_RES");
     if(e&&!strcmp(e,"0"))return 0;
     if(!e||!*e){
@@ -541,6 +555,9 @@ static void patch_render_res(Module *m){
     for(unsigned i=0;i<sizeof sites/sizeof *sites;i++)memcpy(m->base+sites[i].off,&want[i],4);
 #endif
     render_page=m->base+data;render_w=w;render_h=h;
+    if(atomic_load(&render_control_request)){const char *e=getenv("TOTK_RENDER_RES");unsigned bw=0,bh=0;   /* what the scene would have been: key 3 returns to it */
+        if(e&&*e&&sscanf(e,"%ux%u",&bw,&bh)==2){render_boot_w=bw;render_boot_h=bh;}else{render_boot_canvas=1;render_boot_w=render_boot_h=0;}}
+    else{render_boot_w=w;render_boot_h=h;render_boot_canvas=render_canvas;}
     render_res_publish(output_w?(unsigned)runtime_output_size_current():1920);
     fprintf(stderr,"[totk] 1.4.3 render resolution patch: scene render size %ux%u%s (4 instructions at main+0x585e48, value on the data page)\n",
             w,h,set?"":" (the game's handheld size; TOTK_RENDER_RES not set)");
@@ -579,8 +596,10 @@ int runtime_output_res_toggle(void){
     fprintf(stderr,"[totk] 1.4.3 output requested %ux%u (display config %s)\n",(unsigned)now,(unsigned)(now>>32),config?"ready":"not published yet");
     return 1;
 }
+static void render_control_clear(void);
 int runtime_output_mode_cycle(void){
     if(!output_page)return 0;
+    render_control_clear();   /* key 3 takes the picture back from the control menu's resolution */
     extern int mfxup_output_enabled(void);extern void dm_gfx_set_flag(const char *,int);
     int full=atomic_load((_Atomic uint64_t *)(void *)(output_page+32))==pack_size(output_w,output_h);
     int native=0,mfx=0;const char *name;
@@ -593,3 +612,32 @@ int runtime_output_mode_cycle(void){
     picture_mode_save(atomic_load((_Atomic uint64_t *)(void *)(output_page+32)));
     return 1;
 }
+/* The Mac control menu (runtime/game_controls.h), as in game_patches.c: the request word from control_policy.h, latched
+   at the present boundary into the output and render data pages, then the display-config rebuild key 3 uses. Returns 1
+   when it applies while playing, 2 when only from the next start. */
+int runtime_render_configure(unsigned w,unsigned h,int quality){
+    uint64_t request=totk_control_request(w,h,quality);if(!request)return 0;
+    atomic_store(&render_control_request,request);
+    return output_page&&render_page&&w<=output_w&&h<=output_h?1:2;
+}
+uint64_t runtime_render_applied(void){return atomic_load(&render_control_applied);}
+static void render_control_latch(void){
+    uint64_t request=atomic_load(&render_control_request);
+    if(!request||request==atomic_load(&render_control_applied)||!render_page||!output_page)return;
+    unsigned w=request&4095,h=(request>>12)&4095,rw=(request>>24)&4095,rh=(request>>36)&4095;
+    if(w>output_w||h>output_h){fprintf(stderr,"[totk-controls] target %ux%u exceeds the %ux%u swapchain; request declined\n",w,h,output_w,output_h);atomic_store(&render_control_applied,request);return;}
+    render_canvas=0;render_w=rw;render_h=rh;render_res_publish(w);   /* the scene size first: the game rebuilds when told */
+    atomic_store((_Atomic uint64_t *)(void *)(output_page+32),pack_size(w,h));
+    uint64_t config=atomic_load((_Atomic uint64_t *)(void *)(output_page+40));
+    if(config){__atomic_fetch_or((uint32_t *)(uintptr_t)(config+8),1u<<21,__ATOMIC_SEQ_CST);runtime_oe_push_message(30);}
+    extern void dm_gfx_set_flag(const char *,int);
+    int up=(request>>48)!=0;dm_gfx_set_flag("mfx_upscale",up);dm_gfx_set_flag("mfx_output",0);   /* the canvas is the target: no output stage on top */
+    atomic_store(&render_control_applied,request);
+    fprintf(stderr,"[totk-controls] applied scene %ux%u, canvas %ux%u, MetalFX %s (display config %s)\n",rw,rh,w,h,up?"on":"off",config?"ready":"not published yet");
+}
+static void render_control_clear(void){
+    if(!atomic_exchange(&render_control_request,0))return;
+    if(atomic_exchange(&render_control_applied,0)){render_canvas=render_boot_canvas;render_w=render_boot_w;render_h=render_boot_h;render_res_publish((unsigned)runtime_output_size_current());}
+    fprintf(stderr,"[totk-controls] resolution back to key 3's picture modes\n");
+}
+void runtime_render_clear(void){render_control_clear();}

@@ -2395,7 +2395,16 @@ static int diag_shader_prefix_matches(const char *key, uint64_t value) {
     char prefix[17]; snprintf(prefix, sizeof prefix, "%016llx", (unsigned long long)value);
     return key && !strncmp(key, prefix, 16);
 }
+/* The Mac control menu's vertical sync ("flag vsync 0|1", runtime/game_controls.h; default on, as before): off presents
+   on the classic present thread with displaySyncEnabled off and no display link, the uncapped clock pacing alone.
+   30+30 and half the refresh rate order their pictures on the display link, so vsync stays on for them. */
+static _Atomic int g_vsync_off;
+static int vsync_off(void) { int m = mfx_enabled(); return atomic_load_explicit(&g_vsync_off, memory_order_relaxed) && m != MFX_30 && m != MFX_HALF; }
+int dm_gfx_vsync(void) { return !atomic_load(&g_vsync_off); }   // the checkbox's state (30+30 / half keep vsync whatever it says)
 void dm_gfx_set_flag(const char *name, int v) {
+    if (!strcmp(name, "vsync")) { atomic_store(&g_vsync_off, v == 0); MLOG("[flag] vsync = %d%s", v != 0, v ? "" : " (no display link; interpolation at 30+30 / half the refresh rate keeps it)"); return; }
+    if (!strcmp(name, "uncapped_hz")) { extern void nvn_set_uncapped_hz(int); nvn_set_uncapped_hz(v); return; }
+    if (!strcmp(name, "mfx_auto")) { extern void nvn_fi_auto(int); nvn_fi_auto(v); return; }
     if (!strcmp(name, "arg_epoch")) { (void)arg_epoch_on(); atomic_store(&g_arg_epoch_on, v != 0); MLOG("[flag] arg_epoch = %d", v != 0); return; }
     if (!strcmp(name, "arg_epoch_check")) { (void)arg_epoch_on(); atomic_store(&g_arg_epoch_check, v != 0); MLOG("[flag] arg_epoch_check = %d verified=%llu extra=%llu", v != 0, (unsigned long long)atomic_load(&g_arg_epoch_verified), (unsigned long long)atomic_load(&g_arg_epoch_extra)); return; }
     if (!strcmp(name, "tex_slots")) { (void)tex_slots_on(); atomic_store(&g_tex_slots_on, v != 0); MLOG("[flag] tex_slots = %d", v != 0); return; }
@@ -2404,7 +2413,7 @@ void dm_gfx_set_flag(const char *name, int v) {
     if (!strcmp(name, "cube_merge")) { atomic_store(&g_cg_on, v != 0); MLOG("[flag] cube_merge = %d", v != 0); return; }
     if (!strcmp(name, "skip_invisible")) { skv_set(v); return; }
     if (!strcmp(name, "mfx_upscale")) { mfxup_set(v < 0 ? !mfxup_enabled() : v); return; }   // TOTK_MFX_UPSCALE at run time (manual key 3 picture mode)
-    if (!strcmp(name, "mfx_interp")) { mfx_set(v); return; }
+    if (!strcmp(name, "mfx_interp")) { extern void nvn_fi_auto(int); nvn_fi_auto(0); mfx_set(v); return; }   // a chosen mode (key 2) ends the menu's auto tier
     if (!strcmp(name, "mfx_mv_dyn")) { mfx_set_mv_dyn(v); return; }
     if (!strcmp(name, "link_pause")) { void mtl_link_pause(int on); mtl_link_pause(v); MLOG("[flag] link_pause = %d (the display link stops calling back, as when the system stalls it)", v != 0); return; }   // tests the display-link rescue
     if (!strcmp(name, "draw_log")) { extern _Atomic long g_draw_log; atomic_store(&g_draw_log, v); MLOG("[flag] draw_log: every draw and dispatch of the next %d frames", v); return; }
@@ -11162,6 +11171,7 @@ static int mfxup_dock(__unsafe_unretained NvShader *fs) {
    Returns 1 when the draw was replaced (not to be encoded). */
 static _Atomic uint32_t g_scene_w, g_scene_h;   // the internal resolution: the scene the compose draw samples (fps_overlay)
 static _Atomic uint32_t g_out_w, g_out_h;       // the output resolution: the canvas rectangle the game presents (present_encode)
+uint64_t dm_gfx_scene_size(void) { return atomic_load(&g_scene_w) | (uint64_t)atomic_load(&g_scene_h) << 32; }   // the Mac control menu's status line
 static _Atomic uint64_t g_outup_wh, g_outup_last;   // the MetalFX output stage's size (w | h << 32) and the game frame it last ran (output_upscale)
 static void scene_size_note(__unsafe_unretained NvShader *fs) {   // the compose shader's slot 0 is this frame's 3D scene
     if (!TAA_COMPOSE(fs)) return;   // TOTK 0ac9a549, Breath of the Wild 1.6.0 d14b1c38 / 1.9.0 f7ee6fe1 (nvn_obj.h; BotW had no bracket)
@@ -13057,7 +13067,7 @@ static int fps_overlay_prepare(int slot, MTLViewport vp, MTLViewport *ovp, float
    "SHADER +<variants new to the translation cache this run>/<variants in the cache> PSO +<pipelines added to the warm
    lists this run>", yellow for 3 s after something new was collected. Same texture size, font and scale as the FPS box. */
 static int shader_overlay_prepare(int slot, MTLViewport vp, MTLViewport *ovp, float uv[8]) {
-    if (!fps_overlay_full_hud() || !shader_overlay_enabled() || slot < 0 || slot > 3 || !g_shd_tex[slot]) return 0;
+    if (!fps_overlay_hints_enabled() || !shader_overlay_enabled() || slot < 0 || slot > 3 || !g_shd_tex[slot]) return 0;
     static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
     static uint8_t px[LOAD_OVERLAY_TEX_W * FPS_OVERLAY_TEX_H * 4];
     uint64_t fresh = 0, last = 0; int64_t total = -1; totk_rt_counts(&fresh, &total, &last);
@@ -13102,7 +13112,7 @@ static int shader_overlay_prepare(int slot, MTLViewport vp, MTLViewport *ovp, fl
    "P 55% 56% 55% 53%  E 43% 29% 20% 12%  9%  7%  T 47%  GPU 99% (70%)" -- performance / efficiency cores, the busiest thread, the GPU as macOS reports it (our
    keep-alive keeps it near 100 %) and in brackets the GPU time of the game's own work. Values from totk_sysload.c (0.5 s). */
 static int load_overlay_prepare(int slot, MTLViewport vp, MTLViewport *ovp, float uv[8]) {
-    if (!fps_overlay_full_hud() || !sysload_enabled() || slot < 0 || slot > 3 || !g_load_tex[slot]) return 0;
+    if (!fps_overlay_hints_enabled() || !sysload_enabled() || slot < 0 || slot > 3 || !g_load_tex[slot]) return 0;
     sysload_start();
     sysload_info li; if (!sysload_get(&li)) return 0;
     static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
@@ -13660,7 +13670,8 @@ static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t t
     if (!layer) return 0;
     if (g_present_layer_resident != layer) { if (!layer.residencySet) MDIE("present layer has no residency set (layer device %s)", layer.device ? "set" : "missing"); [g_q4 addResidencySet:layer.residencySet]; g_present_layer_resident = layer; }
 #if TARGET_OS_OSX
-    if (!layer.displaySyncEnabled) layer.displaySyncEnabled = YES;   // 窗口模式按显示器垂直同步，防撕裂 | Windowed mode follows the display's vsync to prevent tearing
+    { BOOL sync = !vsync_off();   // 窗口模式按显示器垂直同步，防撕裂；控制菜单可关（flag vsync） | Windowed mode follows the display's vsync to prevent tearing; the control menu can turn it off (flag vsync)
+      if (layer.displaySyncEnabled != sync) layer.displaySyncEnabled = sync; }
 #endif
     present_pipeline(layer.pixelFormat);   // 和原路径一样，首帧编管线在取drawable之前 | Same as the original path: the first frame compiles the pipeline before taking the drawable
     window_shot_tick(g_present_n);
@@ -13940,6 +13951,7 @@ static void link_sync(void) {   // 游戏出图线程每帧调：把节拍对象
     int want = g_dm_present_link;
     if (want < 0 || want > 2) { g_dm_present_link = applied == 3 ? 1 : applied; return; }
     if (want && mtl_fps_target() == 30) want = 3;   // 省电模式：显示节拍 30 Hz | Power-saving mode: display link at 30 Hz
+    if (want && vsync_off()) want = 0;   // 控制菜单关垂直同步：不挂显示节拍（g_dm_present_link 不动，开回时恢复） | The control menu's vsync off: no display link (g_dm_present_link kept for when it comes back on)
     if (want == applied) return;
     g_link_mode = want;
     if (!g_link_started) {

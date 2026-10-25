@@ -241,6 +241,7 @@ id<MTLTexture> mfxup_encode(id<MTL4CommandBuffer> cb, id<MTLTexture> src, NSUInt
 }
 
 uint64_t mfxup_switches(int ci) { return ci >= 0 && ci < MFXUP_NCTX ? g_c[ci].switches : 0; }
+uint64_t mfxup_done(int ci) { return ci >= 0 && ci < MFXUP_NCTX ? g_c[ci].done : 0; }   // encoded upscales (the Mac control menu's status line)
 void mfxup_stats(int ci, char *out, size_t n) {
     if (ci < 0 || ci >= MFXUP_NCTX) { snprintf(out, n, "?"); return; }
     const ctx_t *c = &g_c[ci];

@@ -95,13 +95,19 @@ int runtime_render_res(unsigned *w, unsigned *h);   /* TOTK_RENDER_RES above 160
 int runtime_output_res_toggle(void);                    /* legacy two-state output size switch */
 int runtime_output_mode_cycle(void);                    /* key 3: MetalFX 2K -> native 2K -> off */
 uint64_t runtime_output_size_current(void);              /* configured canvas: width in low 32 bits, height in high 32 bits */
+/* The Mac control menu's resolution (TOTK game_patches.c / game_patches_v143.c; control_policy.h): 0 invalid, 1 applies
+   while playing, 2 from the next start. Cleared by key 3 (runtime_output_mode_cycle) or runtime_render_clear. */
+int runtime_render_configure(unsigned w, unsigned h, int quality);
+uint64_t runtime_render_applied(void);                   /* the request word in force, 0 = none */
+void runtime_render_clear(void);
+void runtime_controls_prepare(void);                     /* Mac frontend: the control menu's saved choices, before the game's code is patched */
 void runtime_warm_progress(uint64_t done,uint64_t total,uint64_t shaders,uint64_t shader_total,uint64_t pipelines,uint64_t pipeline_total);
 void runtime_warm_done(void);
 void runtime_game_slot_acquire(const char *mode);   /* runtime/game_slot.c: one game at a time */
 void *runtime_front_override(const char *name);
 int runtime_front_focus(void);
 void runtime_shortcut_help_toggle(void);
-int fps_overlay_toggle_hints(void);   /* key 1: all -> minimal (FPS only) -> off; returns the new mode, 0 = off */
+int fps_overlay_toggle_hints(void);   /* key 1: all -> readings (no shortcut list) -> off; returns the new mode, 0 = off */
 int fps_overlay_hud_mode(void);
 int fps_overlay_full_hud(void);
 int runtime_aspect_toggle(void);   /* runtime/aspect_patch.h: key 4, 16:9 -> fit to the window / display -> 21:9 (or TOTK_ASPECT) (Mac, 1.2.1 / 1.4.3); 0 where unavailable */
@@ -122,7 +128,9 @@ void runtime_memory_probe(void);
 #include "controls_layout.h"
 void runtime_keyboard_layout_set(const uint8_t keys[CONTROLS_KEYS]);
 void runtime_controller_layout_set(const ControlsLayout *layout); /* main thread, after validated file save */
+void runtime_game_buttons_set(const uint8_t game[CONTROLS_GAME_BUTTONS]); /* controls.txt game_<button> lines */
 void runtime_input_suspend(int on); /* binding sheet: neutral guest input */
+void runtime_input_host_shortcuts(int on);  /* Mac control menu: window keys' shortcuts are dispatched by the frontend */
 void runtime_input_key(unsigned code,int down);
 void runtime_input_clear(void);
 int runtime_handheld_mode(void);   /* TOTK_OPERATION_MODE=handheld (runtime/services.c) */
@@ -142,6 +150,7 @@ void runtime_mouse_set_hook(void (*hook)(void));   /* the window (frontend.m): m
 void runtime_mouse_move(double dx, double dy);      /* points, AppKit's deltaX / deltaY (down positive) */
 void runtime_mouse_button(int button, int down);    /* main thread; 0 left, 1 right, 2 middle, 3 and 4 the side buttons */
 void runtime_mouse_release(void);                   /* main thread: buttons up, stick centred */
+void runtime_mouse_drag(int down);                  /* main thread: controls.txt mouse_drag_look, the right button held outside mouse mode */
 void runtime_touch_pad_set(const RuntimeGamepadState *state);   /* on-screen touch controls (iOS) */
 /* Controller rumble and motion (opt-in TOTK_RUMBLE=1 / TOTK_GYRO=1): the game's hid side in runtime/hid_feedback.c, the
    Mac controller's haptics and motion sensors in runtime/gamepad_feedback.m. */
@@ -178,5 +187,3 @@ int runtime_action_bindings_enabled(void);
 void runtime_action_bindings_attach(void *word);
 #define RUNTIME_ACTION_CODE_OFFSET 0x4000
 #define RUNTIME_ACTION_CODE_SIZE 0x4000
-
-void runtime_input_suspend(int on);

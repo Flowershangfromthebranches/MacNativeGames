@@ -2703,7 +2703,17 @@ static int g_hz = -1, g_display_mode;
    rate: the iPhone / iPad default (user 2026-10-17: at most 60 on the iPhone 14's 60 Hz screen, where frames above it are
    never shown and only heat the phone; since 2026-10-23 the phone holds 30, phone_holds_30). The game still does not wait for the display, so a scene slower than the ceiling
    is not held to 60 / 30 steps. */
+/* The Mac control menu's real frame-rate limit ("flag uncapped_hz", runtime/game_controls.h): the same ceiling at run time,
+   15..240; 0 goes back to TOTK_UNCAPPED_HZ / the default. Only the uncapped clock reads it, so the fixed pacing
+   (TOTK_UNCAPPED=0, DM_PRESENT_HZ) and the interpolation pacings are unchanged; the next present applies it. */
+static _Atomic int g_uncapped_hz_req;
+void nvn_set_uncapped_hz(int hz) {
+    if (hz && (hz < 15 || hz > UNCAPPED_HZ)) { LOG("[flag] uncapped_hz takes 0 or 15..%d, got %d", UNCAPPED_HZ, hz); return; }
+    atomic_store(&g_uncapped_hz_req, hz); LOG("[flag] uncapped_hz = %d%s", hz, hz ? "" : " (TOTK_UNCAPPED_HZ / the default)");
+}
 static int uncapped_cap(int scr) {
+    int req = atomic_load(&g_uncapped_hz_req);
+    if (req) return req;
     const char *e = getenv("TOTK_UNCAPPED_HZ");
 #if TARGET_OS_IPHONE
     if (!e) e = "display";   // at most the screen's rate (60 on an iPhone 14); TOTK_PHONE_FPS=30 holds 30 (phone_holds_30)
@@ -2751,7 +2761,16 @@ static unsigned present_ticks(const win_t *o) {   /* display ticks per game fram
     if (m == MFX_30 || game_holds_30()) { int hz = g_paced_hz > 0 ? g_paced_hz : 60; return (unsigned)(hz >= 45 ? (hz + 15) / 30 : 1); }
     return g_display_mode || (uncapped_now() && !dm_detclock_enabled() && uncapped_interval_on()) || o->interval <= 0 ? 1u : (unsigned)o->interval;
 }
+/* The ceiling the uncapped clock runs at now (0: the game is not on the uncapped clock; -1: before the first present). */
+int nvn_uncapped_hz(void) { return g_hz < 0 ? -1 : g_uncapped ? g_hz : 0; }
+static void uncapped_follow(void) {   /* a new "flag uncapped_hz", on the guest thread that reads g_hz */
+    static int seen; int req = atomic_load(&g_uncapped_hz_req);
+    if (req == seen || g_hz < 0) return;
+    seen = req;
+    if (g_uncapped) { g_hz = uncapped_cap(mtl_display_hz()); LOG("[nvn] 不限帧率的上限改为 %d 帧（控制菜单）", g_hz); }
+}
 static uint64_t present_period(const win_t *o) {
+    uncapped_follow();
     unsigned itv = present_ticks(o); int m = mfx_enabled(), hz = g_uncapped && !uncapped_now() ? g_paced_hz : g_hz;
     { static int was = -1; if (was >= 0 && m != was)
         LOG("[nvn] 出图节拍切换：%s", m == MFX_30 ? (mfx_own_clock() ? "补帧 30+30：游戏按自己的时钟每秒 30 帧" : "补帧 30+30：跟随显示器，每秒 30 帧") :
@@ -2760,6 +2779,47 @@ static uint64_t present_period(const win_t *o) {
                                     g_uncapped ? "补帧关：不限帧率" : "补帧关：按游戏的出图间隔"); was = m; }
     if (m == MFX_30 || game_holds_30()) return 1000000000ull / 30;   /* exactly 30 fps, by display ticks or by our own clock */
     return hz > 0 ? (uint64_t)itv * 1000000000ull / (uint64_t)hz : 0;
+}
+/* The Mac control menu's "auto" frame interpolation ("flag mfx_auto", runtime/game_controls.h): start at half the refresh
+   rate; when the game's own frames keep missing their paced slot for TOTK_FI_AUTO's down time (default 2 s), fall to
+   30+30; after its up time (default 5 s) continuously inside the 30 fps budget, try half again. The signal is the
+   present-to-present wall interval: pacing holds a healthy game exactly at the slot, so an interval beyond the period
+   plus an eighth is a frame that missed it. It only picks between the two existing modes, through mfx_set. */
+static _Atomic int g_fi_auto_on;
+static uint64_t g_fi_auto_last, g_fi_bad_since, g_fi_good_since;
+extern void mfx_set(int mode);   /* totk_mfx.m */
+static double fi_auto_ms(int which) {   /* 0 = fall after this long over budget, 1 = rise after this long inside it; TOTK_FI_AUTO=down,up (ms) */
+    static double down = -1, up;
+    if (down < 0) { down = 2000; up = 5000; const char *e = getenv("TOTK_FI_AUTO");
+        if (e) { double a = 0, b = 0; if (sscanf(e, "%lf,%lf", &a, &b) == 2 && a >= 200 && b >= 500) { down = a; up = b; } } }
+    return which ? up : down;
+}
+int nvn_fi_auto_on(void) { return atomic_load(&g_fi_auto_on); }
+void nvn_fi_auto(int on) {
+    if (atomic_exchange(&g_fi_auto_on, on != 0) == (on != 0)) return;
+    if (on) { mfx_set(MFX_HALF); LOG("[nvn] 补帧自动：先按刷新率一半；连续落后 %.0f ms 降到 30+30，回到预算 %.0f ms 后再试", fi_auto_ms(0), fi_auto_ms(1)); }
+    else LOG("[nvn] 补帧自动：关");
+}
+static void fi_auto_tick(uint64_t period_ns) {   /* every present, on the guest thread */
+    if (!atomic_load(&g_fi_auto_on) || !period_ns) { g_fi_auto_last = g_fi_bad_since = g_fi_good_since = 0; return; }
+    uint64_t now = now_ns();
+    if (g_fi_auto_last && now > g_fi_auto_last) {
+        int missed = now - g_fi_auto_last > period_ns + period_ns / 8, m = mfx_enabled();
+        if (m == MFX_HALF && missed) {
+            if (!g_fi_bad_since) g_fi_bad_since = now;
+            if (now - g_fi_bad_since >= (uint64_t)(fi_auto_ms(0) * 1e6)) {
+                g_fi_bad_since = g_fi_good_since = 0; mfx_set(MFX_30);
+                LOG("[nvn] 补帧自动：真实帧连续落后刷新率一半的节拍 %.0f ms，降到 30+30", fi_auto_ms(0));
+            }
+        } else if (m == MFX_30 && !missed) {
+            if (!g_fi_good_since) g_fi_good_since = now;
+            if (now - g_fi_good_since >= (uint64_t)(fi_auto_ms(1) * 1e6)) {
+                g_fi_bad_since = g_fi_good_since = 0; mfx_set(MFX_HALF);
+                LOG("[nvn] 补帧自动：30 fps 预算内连续 %.0f ms，再试刷新率一半", fi_auto_ms(1));
+            }
+        } else g_fi_bad_since = g_fi_good_since = 0;
+    }
+    g_fi_auto_last = now;
 }
 /* Exercise production policy, including the shrine's interval=2 and the
    legacy 30 FPS path. No sleep, present or GPU allocation is involved. */
@@ -2854,6 +2914,7 @@ NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
           if (ms) LOG("[nvn] 首次进局等管线预热 %d ms（本帧绘制 %llu）", ms, (unsigned long long)this_draws);
       } }
     present_cfg(o);
+    fi_auto_tick(present_period(o));
     uint64_t t0 = now_ns();
     if (async_replay()) {   // TOTK: the present (and the replay frame number below) run on the translation thread, after this frame's submits
         xjob j = {.kind = XJ_PRESENT, .win = o, .idx = idx, .period = present_period(o) / 1e9};

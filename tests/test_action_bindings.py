@@ -57,12 +57,12 @@ class PlayerActions(unittest.TestCase):
             file.write_text("invalid")
             check(0,1)
 
-    @unittest.skipUnless(os.environ.get("TOTK_RUN_APPKIT_PROBES")=="1","opt-in AppKit action sheet probe")
-    def test_action_editor(self):
+    @unittest.skipUnless(os.environ.get("TOTK_RUN_APPKIT_PROBES")=="1","opt-in AppKit control menu actions probe")
+    def test_action_menu(self):
         root=Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as folder:
             exe=Path(folder)/"editor"
-            command=["xcrun","clang","-std=c11","-fobjc-arc","-Wall","-Wextra","-Werror","-Wno-unused-function","-Wno-unused-variable","-Wno-deprecated-declarations","-I"+str(root/"games/totk/third_party/d2r_gfx/gfx/nvn/include"),str(root/"tests/action_editor_probe.m")]
+            command=["xcrun","clang","-std=c11","-fobjc-arc","-Wall","-Wextra","-Werror","-Wno-unused-function","-Wno-unused-variable","-Wno-deprecated-declarations","-I"+str(root/"games/totk/third_party/d2r_gfx/gfx/nvn/include"),str(root/"tests/game_controls_actions_probe.m")]
             for framework in ["Cocoa","QuartzCore","Metal","CoreVideo"]:command += ["-framework",framework]
             build=subprocess.run(command+["-o",str(exe)],capture_output=True,text=True)
             self.assertEqual(build.returncode,0,build.stderr)

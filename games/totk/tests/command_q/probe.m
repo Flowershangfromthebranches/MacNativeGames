@@ -41,6 +41,18 @@ int runtime_aspect_step(void){return -1;}
 float runtime_aspect_now(void){return 0;}
 int taa_enabled(void){return 0;}
 int taa_effective(void){return 0;}
+void runtime_input_key_synthetic(unsigned code,int down){(void)code;(void)down;}
+void runtime_input_host_shortcuts(int on){(void)on;}
+void runtime_game_buttons_set(const uint8_t game[CONTROLS_GAME_BUTTONS]){(void)game;}
+void runtime_mouse_drag(int down){(void)down;}
+int runtime_render_configure(unsigned w,unsigned h,int quality){return totk_control_request(w,h,quality)?2:0;}
+void dm_gfx_set_flag(const char *name,int v){(void)name;(void)v;}
+int dm_gfx_vsync(void){return 1;}
+uint64_t dm_gfx_scene_size(void){return 0;}
+int nvn_uncapped_hz(void){return 120;}
+int nvn_fi_auto_on(void){return 0;}
+uint64_t mfxup_done(int context){(void)context;return 0;}
+void taa_toggle(void){}
 
 static NSEvent *key(NSEventModifierFlags flags){
  return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0

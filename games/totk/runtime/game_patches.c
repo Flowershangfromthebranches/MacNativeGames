@@ -2,6 +2,7 @@
 #include "aspect_patch.h"
 #include "game_version.h"
 #include "world_survey.h"
+#include "control_policy.h"
 #include <TargetConditionals.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,7 +72,9 @@ void runtime_frame_step_pin(double ms) {
     else fprintf(stderr, "[totk] frame step pinned at %.3f ms (ratio %.3f, diagnostics)%s\n", us / 1000.0, us / 1e6 * 30.0,
                  frame_step_data ? "" : " -- but the real-time patch is off, nothing changes");
 }
+static void render_control_latch(void);
 void runtime_frame_step_update(uint64_t now_ns) {
+    render_control_latch();   /* the control menu's resolution, at the present boundary like key 3 */
     if (!frame_step_data || !now_ns) return;
     if (atomic_load_explicit(&pinned_step_us, memory_order_relaxed)) { last_present_ns = now_ns; return; }
     if (!last_present_ns) { last_present_ns = now_ns; return; }
@@ -263,7 +266,15 @@ static const GamePatch render_res_sites[3] = {
     {GAME_ADDR(0xc630c4), 0xbd0cc660, 0x2d420520, "str s0, [x19, #0xcc4] -> ldp s0, s1, [x9, #16]"},
     {GAME_ADDR(0xc630c8), 0x5e21d921, 0xbd0cc660, "scvtf s1, s9 -> str s0, [x19, #0xcc4]"},
 };
+/* The Mac control menu's resolution (runtime_render_configure): set before the game's code is patched when the player
+   saved one, so the scene size comes from it and the patch is installed; a request made later only applies live when
+   the patch is there (the next start otherwise). */
+static _Atomic uint64_t render_control_request, render_control_applied;
+static _Atomic uint64_t *render_control_page;
+static uint64_t render_boot_bits;   /* the scene size the patch wrote at load, restored when the menu's request is cleared */
 static int render_res(unsigned *w, unsigned *h) {
+    uint64_t request = atomic_load(&render_control_request);
+    if (request) { *w = (request >> 24) & 4095; *h = (request >> 36) & 4095; return 1; }
     const char *e = getenv("TOTK_RENDER_RES");
     if (!e || !*e || !strcmp(e, "0")) return 0;
     if (sscanf(e, "%ux%u", w, h) != 2 || *w < 64 || *h < 64 || *w > 4096 || *h > 4096) runtime_fail("TOTK_RENDER_RES must be <width>x<height>");
@@ -292,6 +303,10 @@ static void patch_render_res(Module *m) {
     }
     float v[2] = {(float)w, (float)h};
     memcpy(m->base + data_off + 16, v, sizeof v);
+    render_control_page = (_Atomic uint64_t *)(void *)(m->base + data_off + 16);
+    { const char *e = getenv("TOTK_RENDER_RES"); unsigned bw = 1600, bh = 900;   /* without TOTK_RENDER_RES: the docked scene size the patch replaced */
+      if (e && *e && strcmp(e, "0")) sscanf(e, "%ux%u", &bw, &bh);
+      float b[2] = {(float)bw, (float)bh}; memcpy(&render_boot_bits, b, sizeof b); }
     fprintf(stderr, "[totk] render resolution patch: scene render size %ux%u%s (3 instructions at main+0xc630bc, value on the data page)\n",
             w, h, set ? "" : " (the game's handheld size; TOTK_RENDER_RES not set)");
 }
@@ -371,7 +386,10 @@ int runtime_render_res(unsigned *w, unsigned *h) { (void)w; (void)h; return 0; }
 uint64_t runtime_output_res_extra_bytes(void) {
     unsigned w, h;
     if (!runtime_output_res(&w, &h)) return 0;
-    double ratio = (double)w * h / (1920.0 * 1080.0);
+    /* With a control-menu resolution saved, the 3D scene can be as large as the canvas (the "off" preset at 2560x1440)
+       instead of the docked 1600x900: the heaps are reserved for that from the start. */
+    double base = atomic_load(&render_control_request) ? 1600.0 * 900.0 : 1920.0 * 1080.0;
+    double ratio = (double)w * h / base;
     if (ratio <= 1.0) return 0;
     uint64_t kib = (uint64_t)ceil(113664.0 * ratio / 1024.0) * 1024 - 113664;
     return kib << 10;
@@ -432,11 +450,13 @@ int runtime_output_res_toggle(void) {
 }
 /* Key 3: cycle the active 2K presentation path. The normal startup is 1080p game output with the MetalFX output scaler
    enabled; native 2K switches the game's canvas/UI to 2560x1440; off returns to 1080p and disables the output scaler. */
+static void render_control_clear(void);
 int runtime_output_mode_cycle(void) {
     if (!output_page) {
         fprintf(stderr, "[totk] key 3: 2K mode cycling needs a 2K-capable start (TOTK_OUTPUT_RES=auto with the HeapDef overlay, or <w>x<h>)\n");
         return 0;
     }
+    render_control_clear();   /* key 3 takes the picture back from the control menu's resolution */
     _Atomic uint64_t *size = (_Atomic uint64_t *)(void *)(output_page + DP_OUTPUT_SIZE);
     int full = atomic_load(size) == pack_size(output_w, output_h);
     extern int mfxup_output_enabled(void);
@@ -452,6 +472,38 @@ int runtime_output_mode_cycle(void) {
     fprintf(stderr, "[totk] key 3: %s\n", name);
     return 1;
 }
+/* The Mac control menu (runtime/game_controls.h): one request word holds the canvas, the scene and the MetalFX preset
+   (control_policy.h totk_control_request). The UI never touches guest memory: the present boundary latches the request
+   into the data pages the output and render patches already read, and asks the game for a new layout as key 3 does.
+   Returns 1 when it can apply while playing, 2 when only from the next start (no output / render patch this run). */
+int runtime_render_configure(unsigned w, unsigned h, int quality) {
+    uint64_t request = totk_control_request(w, h, quality);
+    if (!request) return 0;
+    atomic_store(&render_control_request, request);
+    return output_page && render_control_page && w <= output_w && h <= output_h ? 1 : 2;
+}
+uint64_t runtime_render_applied(void) { return atomic_load(&render_control_applied); }
+static void render_control_latch(void) {
+    uint64_t request = atomic_load(&render_control_request);
+    if (!request || request == atomic_load(&render_control_applied) || !render_control_page || !output_page) return;
+    unsigned w = request & 4095, h = (request >> 12) & 4095, rw = (request >> 24) & 4095, rh = (request >> 36) & 4095;
+    if (w > output_w || h > output_h) { fprintf(stderr, "[totk-controls] target %ux%u exceeds the %ux%u swapchain; request declined\n", w, h, output_w, output_h); atomic_store(&render_control_applied, request); return; }
+    float f[2] = {(float)rw, (float)rh}; uint64_t bits; memcpy(&bits, f, sizeof bits); atomic_store(render_control_page, bits);
+    atomic_store((_Atomic uint64_t *)(void *)(output_page + DP_OUTPUT_SIZE), pack_size(w, h));
+    uint64_t renderer = atomic_load((_Atomic uint64_t *)(void *)(output_page + DP_RENDERER));
+    if (renderer) { __atomic_fetch_or((uint32_t *)(uintptr_t)(renderer + 0xca4), 0x200u, __ATOMIC_SEQ_CST); runtime_oe_push_message(30); }
+    extern void dm_gfx_set_flag(const char *name, int value);
+    int up = (request >> 48) != 0;
+    dm_gfx_set_flag("mfx_upscale", up); dm_gfx_set_flag("mfx_output", 0);   /* the canvas is the target: no output stage on top */
+    atomic_store(&render_control_applied, request);
+    fprintf(stderr, "[totk-controls] applied scene %ux%u, canvas %ux%u, MetalFX %s (guest layout requested)\n", rw, rh, w, h, up ? "on" : "off");
+}
+static void render_control_clear(void) {
+    if (!atomic_exchange(&render_control_request, 0)) return;
+    if (atomic_exchange(&render_control_applied, 0) && render_control_page) atomic_store(render_control_page, render_boot_bits);
+    fprintf(stderr, "[totk-controls] resolution back to key 3's picture modes\n");
+}
+void runtime_render_clear(void) { render_control_clear(); }
 
 /* Diagnostic (Mac): TOTK_TRAP_AT=<main offset> writes brk #0 there; the crash handler (runtime/loader.c, SIGTRAP) then prints
    the registers and the call chain at that moment, plus what TOTK_CRASH_MEM / TOTK_CRASH_HEAPFIND / TOTK_CRASH_HEAPWALK ask for,

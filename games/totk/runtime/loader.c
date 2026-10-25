@@ -572,6 +572,10 @@ int main(int argc,char **argv) {
  need(pthread_key_create(&environment_key,environment_destroy)==0,"thread environment key");
  for(unsigned i=0;i<NM;i++)map_module(&modules[i],argv[1]);
  for(unsigned i=0;i<NM;i++)relocate(&modules[i]);
+#if !TARGET_OS_IPHONE
+ /* The Mac control menu's saved choices (runtime/game_controls.h), before the patches: a saved resolution decides 1.0.0's render patch. */
+ if(!strcmp(argv[2],"boot")&&!getenv("TOTK_VERIFY_STARTUP")&&!getenv("TOTK_HEADLESS"))runtime_controls_prepare();
+#endif
  for(unsigned i=0;i<NM;i++)if(!strcmp(modules[i].name,"main"))runtime_game_patches(&modules[i]);
 #if !TARGET_OS_IPHONE
  if(!strcmp(argv[2],"export-ios")){const char *out=getenv("TOTK_EXPORT_IOS");need(out!=NULL,"export-ios needs TOTK_EXPORT_IOS=<dir>");export_ios_text(argv[1],out);return 0;}

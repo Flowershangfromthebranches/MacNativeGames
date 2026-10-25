@@ -1,4 +1,5 @@
 #include "../runtime/runtime.h"
+#include "../runtime/autoload.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -190,6 +191,16 @@ int main(void){
  runtime_input_suspend(1);fake_pad.buttons=1;runtime_input_key(38,1);read(&out.state,1,&id);need(out.state.attr==1&&!out.state.buttons&&!out.state.rx,"sheet isolates keyboard and controller");
  runtime_input_suspend(0);read(&out.state,1,&id);need(!out.state.buttons&&!out.state.rx,"closing sheet clears held input");
  controls_layout_default(&layout);runtime_keyboard_layout_set(layout.keys);
+ /* The Mac control menu: window keys' shortcuts go to the frontend (runtime_input_host_shortcuts), scripted keys keep them;
+    controls.txt game_<button> is the last layer before the game. */
+ runtime_input_host_shortcuts(1);int helpBefore=help_toggles;runtime_input_key(18,1);runtime_input_key(18,0);need(help_toggles==helpBefore,"host shortcuts: a window key does not run the fixed handler");
+ runtime_input_key_synthetic(18,1);runtime_input_key_synthetic(18,0);need(help_toggles==helpBefore+1,"host shortcuts: the synthetic key still does");
+ runtime_input_host_shortcuts(0);runtime_input_key(18,1);runtime_input_key(18,0);need(help_toggles==helpBefore+2,"without host shortcuts the window key acts as before");
+ for(unsigned i=0;i<CONTROLS_GAME_BUTTONS;i++)layout.game[i]=(uint8_t)i;layout.game[0]=3;layout.game[2]=CONTROLS_GAME_NONE;runtime_game_buttons_set(layout.game);
+ runtime_input_key(38,1);read(&out.state,1,&id);need(out.state.buttons==8,"game buttons: A reaches the game as Y");runtime_input_key(38,0);
+ runtime_input_key(34,1);read(&out.state,1,&id);need(!out.state.buttons,"game buttons: X dropped");runtime_input_key(34,0);
+ for(unsigned i=0;i<CONTROLS_GAME_BUTTONS;i++)layout.game[i]=(uint8_t)i;runtime_game_buttons_set(layout.game);
+ runtime_input_key(38,1);runtime_input_key(38,0);read(&out.state,1,&id);need(out.state.buttons==1,"game buttons: identity again");read(&out.state,1,&id);
  handheld=1;
  void(*styles)(uint32_t)=runtime_input_override("_ZN2nn3hid24SetSupportedNpadStyleSetENS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE");
  void(*ids)(const uint32_t *,uint64_t)=runtime_input_override("_ZN2nn3hid22SetSupportedNpadIdTypeEPKjm");
@@ -201,5 +212,5 @@ int main(void){
  runtime_input_key(38,1);runtime_input_key(38,0);need(hread(&out.state,1,&hid)==1&&out.state.buttons==1&&out.state.attr==1,"handheld short tap latched");
  read(&out.state,1,&id);need(!out.state.attr&&!out.state.buttons,"handheld mode: player 1 not attached");
  feedback_checks();
- puts("{\"status\":\"pass\",\"scope\":\"input service state ABI, rumble and six-axis hid answers (on by default, off with =0 and in agent test sessions, left/right handles, batches, mute flags, newest-first states, orientation in the controller frame, gravity pull, axis remap), short tap latch, keyboard axes, four D-pad directions, focus clear of keyboard and controller, key 1 overlays / key 2 frame interpolation / key 3 picture mode / key 4 ultrawide / key 5 edge smoothing / key 6 controller type / key 7 mouse mode (once per press), mouse mode owning the gyro, unattached controller, handheld mode controller; no game control flow\"}");
+ puts("{\"status\":\"pass\",\"scope\":\"input service state ABI, rumble and six-axis hid answers (on by default, off with =0 and in agent test sessions, left/right handles, batches, mute flags, newest-first states, orientation in the controller frame, gravity pull, axis remap), short tap latch, keyboard axes, four D-pad directions, focus clear of keyboard and controller, key 1 overlays / key 2 frame interpolation / key 3 picture mode / key 4 ultrawide / key 5 edge smoothing / key 6 controller type / key 7 mouse mode (once per press), host-dispatched shortcuts, game button layer, mouse mode owning the gyro, unattached controller, handheld mode controller; no game control flow\"}");
 }

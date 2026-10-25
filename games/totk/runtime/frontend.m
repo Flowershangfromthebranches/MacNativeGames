@@ -25,7 +25,6 @@ static NSView *shortcutHelp;
 static BOOL mouseHeld;
 static int textEntryOpen;
 static BOOL controlsOpen;
-static BOOL actionEditorOpen;
 static void front_mouse_update(void);
 int taa_enabled(void);   /* third_party/d2r_gfx/gfx/nvn/totk_taa.m: key 5 */
 int taa_effective(void);   /* a frame has been anti-aliased */
@@ -108,6 +107,7 @@ static CVReturn vsync_callback(CVDisplayLinkRef link,const CVTimeStamp *now,cons
  (void)link;(void)now;(void)output;(void)flags;(void)out;(void)ctx;
  pthread_mutex_lock(&vsyncLock);for(unsigned i=0;i<vsyncCount;i++)hle_signal_system_event(vsyncEvents[i]);pthread_mutex_unlock(&vsyncLock);return kCVReturnSuccess;
 }
+#include "game_controls.h"
 @interface TOTKInputView:NSView
 @property(strong) NSTimer *cursorHideTimer;
 @property BOOL cursorAutoHideActive;
@@ -116,7 +116,7 @@ static CVReturn vsync_callback(CVDisplayLinkRef link,const CVTimeStamp *now,cons
 @end
 @implementation TOTKInputView
 -(BOOL)acceptsFirstResponder{return YES;}
--(void)keyDown:(NSEvent *)e{runtime_input_key(e.keyCode,1);}
+-(void)keyDown:(NSEvent *)e{if(!runtime_controls_handle_key(e.keyCode,e.modifierFlags,e.isARepeat))runtime_input_key(e.keyCode,1);}   /* the control menu's shortcuts first */
 -(void)keyUp:(NSEvent *)e{runtime_input_key(e.keyCode,0);}
 -(void)flagsChanged:(NSEvent *)e{
  /* Device-specific bits distinguish left/right modifiers even when both are down. */
@@ -138,12 +138,12 @@ static CVReturn vsync_callback(CVDisplayLinkRef link,const CVTimeStamp *now,cons
  self.cursorHideTimer=[NSTimer scheduledTimerWithTimeInterval:1.5 target:self selector:@selector(hideCursorIfIdle:) userInfo:nil repeats:NO];
 }
 -(void)mouseDragged:(NSEvent *)e{if(mouseHeld)runtime_mouse_move(e.deltaX,e.deltaY);}
--(void)rightMouseDragged:(NSEvent *)e{if(mouseHeld)runtime_mouse_move(e.deltaX,e.deltaY);}
+-(void)rightMouseDragged:(NSEvent *)e{if(mouseHeld||controlsDragLook)runtime_mouse_move(e.deltaX,e.deltaY);}
 -(void)otherMouseDragged:(NSEvent *)e{if(mouseHeld)runtime_mouse_move(e.deltaX,e.deltaY);}
 -(void)mouseDown:(NSEvent *)e{(void)e;if(mouseHeld)runtime_mouse_button(0,1);}
 -(void)mouseUp:(NSEvent *)e{(void)e;runtime_mouse_button(0,0);}
--(void)rightMouseDown:(NSEvent *)e{(void)e;if(mouseHeld)runtime_mouse_button(1,1);}   /* no context menu */
--(void)rightMouseUp:(NSEvent *)e{(void)e;runtime_mouse_button(1,0);}
+-(void)rightMouseDown:(NSEvent *)e{(void)e;if(mouseHeld)runtime_mouse_button(1,1);else if(controlsDragLook)runtime_mouse_drag(1);}   /* no context menu; controls.txt mouse_drag_look: drag to look */
+-(void)rightMouseUp:(NSEvent *)e{(void)e;runtime_mouse_button(1,0);runtime_mouse_drag(0);}
 -(void)otherMouseDown:(NSEvent *)e{if(mouseHeld)runtime_mouse_button((int)e.buttonNumber,1);}   /* 2 middle, 3 and 4 the side buttons */
 -(void)otherMouseUp:(NSEvent *)e{runtime_mouse_button((int)e.buttonNumber,0);}
 -(void)setCursorAutoHideEnabled:(BOOL)enabled{
@@ -159,7 +159,7 @@ static CVReturn vsync_callback(CVDisplayLinkRef link,const CVTimeStamp *now,cons
 }
 @end
 static void front_mouse_update(void){   /* main thread; also runtime/gamepad.m's hook when mouse mode changes */
- BOOL want=window&&runtime_mouse_enabled()&&window.isKeyWindow&&!textEntryOpen&&!controlsOpen&&!actionEditorOpen;
+ BOOL want=window&&runtime_mouse_enabled()&&window.isKeyWindow&&!textEntryOpen&&!controlsOpen;
  if(want==mouseHeld)return;
  mouseHeld=want;
  if(want){
@@ -172,8 +172,6 @@ static void front_mouse_update(void){   /* main thread; also runtime/gamepad.m's
  }
  fprintf(stderr,"[totk] mouse %s\n",want?"held by the window (key 7, or Command-Tab, lets it go)":"let go");
 }
-#include "controls_editor.h"
-#include "action_editor.h"
 @interface TOTKShortcutHelp:NSView
 @property(strong) NSTextField *label;
 @property(strong) NSTimer *timer;
@@ -212,9 +210,22 @@ static NSString *shortcut_text(void){
  NSString *ratio=!ar?@"16:9":fabsf(ar*9-21)<0.05f?@"21:9":[NSString stringWithFormat:@"%.2f:1",ar];
  NSString *shape=step==1?[NSString stringWithFormat:@(TOTK_UI("适配窗口 %@","fit to window %@")),ratio]:step==2?ratio:@"16:9";
  if(step<0)shape=@(TOTK_UI("本游戏暂不支持","not available in this game"));   /* runtime_aspect_step -1: this game version has no aspect sites */
- return [NSString stringWithFormat:@(TOTK_UI("快捷键说明\n1  提示：全部 → 只显示 FPS → 隐藏\n2  补帧：当前 %@（按键切换）\n3  画质：当前 %@（按键切换）\n4  画面比例：当前 %@（按键切换）\n5  边缘平滑（MetalFX 时间性）：%@\n6  手柄类型：当前 %@（按键切换）\n7  鼠标操作：当前 %@（按键切换）","Shortcuts\n1  Overlays: all → FPS only → off\n2  Interpolation: %@ (current; press to cycle)\n3  Picture: %@ (current; press to cycle)\n4  Aspect ratio: %@ (current; press to cycle)\n5  Edge smoothing (MetalFX Temporal): %@\n6  Controller type: %@ (current; press to cycle)\n7  Mouse: %@ (current; press to switch)")),[NSString stringWithUTF8String:interp],picture,shape,
-  taa_enabled()?(taa_effective()?@(TOTK_UI("开","on")):@(TOTK_UI("开（未生效）","on (not in effect)"))):@(TOTK_UI("关","off")),pad_type_text(),
-  runtime_mouse_enabled()?@(TOTK_UI("开（视角、按键，⌘Tab 释放指针）","on (camera, buttons; Command-Tab frees the pointer)")):@(TOTK_UI("关","off"))];
+ NSString *taa=taa_enabled()?(taa_effective()?@(TOTK_UI("开","on")):@(TOTK_UI("开（未生效）","on (not in effect)"))):@(TOTK_UI("关","off"));
+ NSString *mouse=runtime_mouse_enabled()?@(TOTK_UI("开（视角、按键，⌘Tab 释放指针）","on (camera, buttons; Command-Tab frees the pointer)")):@(TOTK_UI("关","off"));
+ /* Each line starts with the key the Game Controls menu binds to it (its Shortcuts page); an unassigned one is left out. */
+ NSString *const lines[]={@(TOTK_UI("控制菜单（⌘, 也可以）","Game Controls (also Command+,)")),
+  @(TOTK_UI("提示：全部 → 关闭快捷键说明 → 隐藏","Overlays: all → readings only → off")),
+  [NSString stringWithFormat:@(TOTK_UI("补帧：当前 %@（按键切换）","Interpolation: %@ (current; press to cycle)")),[NSString stringWithUTF8String:interp]],
+  [NSString stringWithFormat:@(TOTK_UI("画质：当前 %@（按键切换）","Picture: %@ (current; press to cycle)")),picture],
+  [NSString stringWithFormat:@(TOTK_UI("画面比例：当前 %@（按键切换）","Aspect ratio: %@ (current; press to cycle)")),shape],
+  [NSString stringWithFormat:@(TOTK_UI("边缘平滑（MetalFX 时间性）：%@","Edge smoothing (MetalFX Temporal): %@")),taa],
+  [NSString stringWithFormat:@(TOTK_UI("手柄类型：当前 %@（按键切换）","Controller type: %@ (current; press to cycle)")),pad_type_text()],
+  [NSString stringWithFormat:@(TOTK_UI("鼠标操作：当前 %@（按键切换）","Mouse: %@ (current; press to switch)")),mouse]};
+ static const unsigned actions[]={CONTROL_SHORTCUT_MENU,CONTROL_SHORTCUT_HUD,CONTROL_SHORTCUT_INTERP,CONTROL_SHORTCUT_PICTURE,CONTROL_SHORTCUT_ASPECT,CONTROL_SHORTCUT_TAA,CONTROL_SHORTCUT_PAD,CONTROL_SHORTCUT_MOUSE};
+ NSMutableString *text=[NSMutableString stringWithString:@(TOTK_UI("快捷键说明","Shortcuts"))];
+ for(unsigned i=0;i<sizeof actions/sizeof actions[0];i++){uint64_t key=controlsLoaded?atomic_load(&controlKeys[actions[i]]):actions[i]==CONTROL_SHORTCUT_MENU?0:control_shortcut_default(actions[i]);   // before the menu loads: the game's own keys
+  if(key)[text appendFormat:@"\n%@  %@",hotkey_title(key),lines[i]];}
+ return text;
 }
 -(instancetype)initWithFrame:(NSRect)frame{if((self=[super initWithFrame:frame])){int compact=hud_compact();self.wantsLayer=YES;self.layer.backgroundColor=[NSColor colorWithCalibratedWhite:0.04 alpha:compact?0.72:0.86].CGColor;self.layer.cornerRadius=compact?7:14;self.layer.borderWidth=1;self.layer.borderColor=[NSColor colorWithCalibratedWhite:1 alpha:compact?0.14:0.2].CGColor;
  self.label=[NSTextField labelWithString:shortcut_text()];self.label.font=[NSFont systemFontOfSize:17 weight:NSFontWeightMedium];self.label.textColor=NSColor.whiteColor;self.label.alignment=NSTextAlignmentCenter;self.label.maximumNumberOfLines=0;self.label.lineBreakMode=NSLineBreakByWordWrapping;self.label.frame=NSInsetRect(self.bounds,20,18);self.label.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;[self addSubview:self.label];
@@ -225,10 +236,10 @@ static NSString *shortcut_text(void){
  NSFont *mono=[NSFont monospacedSystemFontOfSize:10.5 weight:NSFontWeightMedium],*small=[NSFont systemFontOfSize:10];
  NSColor *green=[NSColor colorWithCalibratedRed:80/255.0 green:1 blue:120/255.0 alpha:1],*yellow=[NSColor colorWithCalibratedRed:1 green:230/255.0 blue:40/255.0 alpha:1];
  NSMutableAttributedString *a=[NSMutableAttributedString new];
- int full=fps_overlay_full_hud();   // key 1 minimal: the FPS line (line 0) only; the others keep their last text, so skip them
- for(int i=0;i<4;i++){char t[128];int hl=0;if((!full&&i!=0)||!hud_snapshot(i,t,sizeof t,&hl))continue;   // FPS, shaders, render pipelines, load
+ int full=fps_overlay_full_hud();   // key 1 readings: the same lines without the shortcut list
+ for(int i=0;i<4;i++){char t[128];int hl=0;if(!hud_snapshot(i,t,sizeof t,&hl))continue;   // FPS, shaders, render pipelines, load
   [a appendAttributedString:[[NSAttributedString alloc] initWithString:[([NSString stringWithUTF8String:t] ?: @"") stringByAppendingString:@"\n"] attributes:@{NSFontAttributeName:mono,NSForegroundColorAttributeName:hl?yellow:green}]];}
- if(!full){if(a.length)[a deleteCharactersInRange:NSMakeRange(a.length-1,1)];   // no empty line under the single FPS line
+ if(!full){if(a.length)[a deleteCharactersInRange:NSMakeRange(a.length-1,1)];   // no empty line under the last reading
   else [a appendAttributedString:[[NSAttributedString alloc] initWithString:@"FPS --" attributes:@{NSFontAttributeName:mono,NSForegroundColorAttributeName:green}]];}
  else if(a.length){NSMutableParagraphStyle *gap=[NSMutableParagraphStyle new];gap.paragraphSpacingBefore=4;
   [a appendAttributedString:[[NSAttributedString alloc] initWithString:shortcut_text() attributes:@{NSFontAttributeName:small,NSForegroundColorAttributeName:[NSColor colorWithCalibratedWhite:0.75 alpha:1],NSParagraphStyleAttributeName:gap}]];}
@@ -277,8 +288,8 @@ static void front_menubar_fps(void){   // starts the refresh once the window exi
   if(fpsMenu&&![fpsMenu.title isEqualToString:title]){fpsMenu.title=title;fpsMenuItem.title=title;}
   front_title_fps(title);}];
 }
-void runtime_shortcut_help_toggle(void){int mode=fps_overlay_toggle_hints();dispatch_async(dispatch_get_main_queue(), ^{   // key 1: all -> minimal (FPS only) -> off
- shortcutHelp.hidden=mode==0||(mode==2&&!hud_compact());[(TOTKShortcutHelp *)shortcutHelp refresh];});}   // mode 0 off, 2 minimal (fps_overlay.h HUD_MODE_*)
+void runtime_shortcut_help_toggle(void){int mode=fps_overlay_toggle_hints();dispatch_async(dispatch_get_main_queue(), ^{   // key 1: all -> readings (no shortcut list) -> off
+ shortcutHelp.hidden=mode==0||(mode==2&&!hud_compact());[(TOTKShortcutHelp *)shortcutHelp refresh];});}   // mode 0 off, 2 readings (fps_overlay.h HUD_MODE_*); the corners layout's box is the list only
 /* The drawable follows the window's pixel size; the present pass scales the game picture (1920x1080 docked) into it and
    keeps 16:9 (black bars on other shapes), so a larger window or full screen shows the game at its own resolution instead
    of a fixed small drawable that the compositor stretches. */
@@ -318,8 +329,8 @@ void runtime_front_resize_aspect(double ratio){
 @interface TOTKWindowDelegate:NSObject<NSWindowDelegate>
 @end
 @implementation TOTKWindowDelegate
--(void)windowDidBecomeKey:(NSNotification *)n{(void)n;atomic_store(&focused,1);if(window.styleMask&NSWindowStyleMaskFullScreen)[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:YES];runtime_oe_push_message(15);front_mouse_update();fprintf(stderr,"[totk] window gained focus\n");}
--(void)windowDidResignKey:(NSNotification *)n{(void)n;atomic_store(&focused,0);[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:NO];front_mouse_update();runtime_input_clear();runtime_oe_push_message(15);fprintf(stderr,"[totk] window lost focus\n");}
+-(void)windowDidBecomeKey:(NSNotification *)n{(void)n;atomic_store(&focused,1);display_presentation();if(window.styleMask&NSWindowStyleMaskFullScreen)[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:YES];runtime_oe_push_message(15);front_mouse_update();fprintf(stderr,"[totk] window gained focus\n");}
+-(void)windowDidResignKey:(NSNotification *)n{(void)n;atomic_store(&focused,0);runtime_mouse_drag(0);display_presentation();[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:NO];front_mouse_update();runtime_input_clear();runtime_oe_push_message(15);fprintf(stderr,"[totk] window lost focus\n");}
 /* The process ends with the window. Save writes go straight to the files (runtime/fs_host.c), so a close in the middle of a
    save waits (up to 15 s, the window already gone) until the game has written and committed it (runtime_fs_save_busy). */
 -(void)windowWillClose:(NSNotification *)n{(void)n;
@@ -332,8 +343,10 @@ void runtime_front_resize_aspect(double ratio){
   fprintf(stderr,"[totk] save %s after %.2f s; quitting\n",runtime_fs_save_busy()?"still in progress (gave up)":"done",(runtime_now_ns()-t0)/1e9);_exit(0);});
 }
 -(void)windowDidResize:(NSNotification *)n{(void)n;front_sync_drawable();}
--(void)windowDidEnterFullScreen:(NSNotification *)n{(void)n;[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:window.isKeyWindow];}
--(void)windowDidExitFullScreen:(NSNotification *)n{(void)n;[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:NO];}
+-(void)windowDidFailToEnterFullScreen:(NSWindow *)w{(void)w;display_transition_done();}
+-(void)windowDidFailToExitFullScreen:(NSWindow *)w{(void)w;display_transition_done();}
+-(void)windowDidEnterFullScreen:(NSNotification *)n{(void)n;[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:window.isKeyWindow];display_transition_done();}
+-(void)windowDidExitFullScreen:(NSNotification *)n{(void)n;[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:NO];display_transition_done();}
 /* Whether any part of the window can be seen (TOTK, 2026-10-16 night): macOS stops the display link's callbacks for a
    fully covered window, so presents stop and per-picture measurements of that stretch are void; a test session's log
    says when (the user working in other apps covered the test windows of the frame interpolation tests). */
@@ -350,13 +363,9 @@ void runtime_front_request_close(void){dispatch_async(dispatch_get_main_queue(),
 static void front_install_menu(void){
  NSMenu *menu=[NSMenu new],*appMenu=[NSMenu new];
  NSMenuItem *appItem=[NSMenuItem new];appItem.submenu=appMenu;[menu addItem:appItem];
- controlsEditor=[TOTKControlsEditor new];
- NSMenuItem *bindings=[[NSMenuItem alloc] initWithTitle:@(TOTK_UI("按键绑定…","Input Bindings…")) action:@selector(open:) keyEquivalent:@","];
- bindings.target=controlsEditor;bindings.keyEquivalentModifierMask=NSEventModifierFlagCommand;[appMenu addItem:bindings];
-
- actionEditor=[TOTKActionEditor new];
- NSMenuItem *actions=[[NSMenuItem alloc] initWithTitle:@(TOTK_UI("玩家动作…","Player Actions…")) action:@selector(open:) keyEquivalent:@""];
- actions.target=actionEditor;[appMenu addItem:actions];[appMenu addItem:NSMenuItem.separatorItem];
+ gameControls=[TOTKGameControls new];
+ NSMenuItem *controls=[[NSMenuItem alloc] initWithTitle:@(TOTK_UI("控制菜单…","Game Controls…")) action:@selector(showSettings:) keyEquivalent:@","];
+ controls.target=gameControls;controls.keyEquivalentModifierMask=NSEventModifierFlagCommand;[appMenu addItem:controls];[appMenu addItem:NSMenuItem.separatorItem];
  NSMenuItem *quit=[[NSMenuItem alloc] initWithTitle:@(TOTK_UI("退出 " GAME_NAME,"Quit " GAME_NAME)) action:@selector(performClose:) keyEquivalent:@"q"];
  quit.keyEquivalentModifierMask=NSEventModifierFlagCommand;quit.target=window;
  [appMenu addItem:quit];front_menubar_fps_add(menu);NSApp.mainMenu=menu;
@@ -405,6 +414,7 @@ void runtime_front_run(void(*callback)(void)){
   /* The FPS, shader and load lines: in the corner panel above (compact HUD), or with TOTK_HUD=corners drawn into the game picture's corners by the present encoder (gfx/nvn/fps_overlay.c). */
   [window makeFirstResponder:window.contentView];[window center];front_sync_drawable();
   if(assume_focus()){[window orderFrontRegardless];}else{[window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];}   /* in front of other apps' windows, keyboard left alone */
+  controls_window_ready();   /* the control menu's shortcuts and saved window mode */
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{note_occlusion(" 3 s after opening");});
   atomic_store(&focused,1);
   if(CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)||CVDisplayLinkSetOutputCallback(displayLink,vsync_callback,NULL)||CVDisplayLinkStart(displayLink))runtime_fail("native display link initialization");
