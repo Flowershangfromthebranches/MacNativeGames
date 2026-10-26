@@ -11,6 +11,8 @@ _Noreturn void runtime_fail(const char *message){fprintf(stderr,"FAIL: %s\n",mes
 void runtime_input_key(unsigned code,int down){(void)code;(void)down;}
 void runtime_input_clear(void){}
 static int suspended;void runtime_input_suspend(int on){suspended=on;}
+void runtime_keyboard_layout_set(const uint8_t keys[CONTROLS_KEYS]){(void)keys;}
+void runtime_controller_layout_set(const ControlsLayout *layout){(void)layout;}
 void runtime_gamepad_start(void){}
 int runtime_gamepad_type(int *detected){if(detected)*detected=-1;return 0;}
 int runtime_mouse_enabled(void){return 0;}
