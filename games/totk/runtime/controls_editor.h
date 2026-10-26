@@ -17,14 +17,6 @@ static NSString *controls_key_label(unsigned key){
   [96]="F5",[97]="F6",[98]="F7",[99]="F3",[100]="F8",[101]="F9",[103]="F11",[109]="F10",[111]="F12",[115]="Home",[116]="Page Up",[117]="Forward Delete",[118]="F4",[119]="End",[120]="F2",[121]="Page Down",[122]="F1",[123]="Left",[124]="Right",[125]="Down",[126]="Up"};
  return labels[key]?[NSString stringWithUTF8String:labels[key]]:[NSString stringWithFormat:@"Key %u",key];
 }
-static NSTextField *controls_label(NSView *view,NSString *text,NSRect frame){
- NSTextField *label=[NSTextField labelWithString:text];label.frame=frame;[view addSubview:label];return label;
-}
-@interface TOTKControlsRows:NSView
-@end
-@implementation TOTKControlsRows
--(BOOL)isFlipped{return YES;}
-@end
 @interface TOTKControlsEditor:NSObject {
  @public ControlsLayout draft;
 }
@@ -36,6 +28,7 @@ static NSTextField *controls_label(NSView *view,NSString *text,NSRect frame){
 @property(strong) NSPopUpButton *padType;   /* CONTROLS_PAGE_CONTROLLER: the controller type, set on Apply */
 @property int page;
 @property BOOL actions;   /* the player actions page is in this sheet */
+@property(strong) NSMutableArray<NSScrollView *> *pages;   /* one list per segment, the others hidden */
 -(void)open:(id)sender;
 -(void)openPage:(int)page;
 -(BOOL)loadLayout:(NSError **)error;
@@ -71,14 +64,18 @@ static TOTKControlsEditor *controlsEditor;
  if(![data writeToFile:self.path options:NSDataWritingAtomic error:error])return NO;
  self.original=data;runtime_keyboard_layout_set(draft.keys);runtime_controller_layout_set(&draft);return YES;
 }
--(NSPopUpButton *)popup:(NSView *)view frame:(NSRect)frame names:(NSArray<NSString *> *)names tag:(NSInteger)tag action:(SEL)action{
- NSPopUpButton *p=[[NSPopUpButton alloc] initWithFrame:frame pullsDown:NO];[p addItemsWithTitles:names];p.tag=tag;p.target=self;p.action=action;if(view)[view addSubview:p];return p;
+-(NSPopUpButton *)popup:(NSView *)band x:(CGFloat)x w:(CGFloat)w names:(NSArray<NSString *> *)names tag:(NSInteger)tag action:(SEL)action{
+ NSPopUpButton *p=panel_popup(band,names,x,w,PANEL_ROW_H);p.tag=tag;p.target=self;p.action=action;return p;
 }
--(NSView *)scrollPage:(NSTabView *)tabs name:(NSString *)name rows:(unsigned)rows{
- NSTabViewItem *item=[[NSTabViewItem alloc] initWithIdentifier:name];item.label=name;
- NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(0,0,620,430)];scroll.hasVerticalScroller=YES;scroll.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;
- NSView *content=[[TOTKControlsRows alloc] initWithFrame:NSMakeRect(0,0,600,rows*32+12)];scroll.documentView=content;item.view=scroll;[tabs addTabViewItem:item];return content;
+/* A segment's list in the sheet's list area; a header line of column names first when there is one. */
+-(NSView *)scrollPage:(NSRect)frame rows:(unsigned)rows header:(NSArray<NSString *> *)header{
+ CGFloat top=header?20:0;NSScrollView *scroll;
+ NSView *content=panel_scroll(self.panel.contentView,frame,top+rows*(PANEL_ROW_H+PANEL_GAP)-PANEL_GAP,&scroll);
+ for(NSUInteger i=0;i<header.count;i++){NSTextField *t=[NSTextField labelWithString:header[i]];t.font=[NSFont systemFontOfSize:11];
+  t.textColor=[NSColor colorWithCalibratedWhite:0.7 alpha:1];t.frame=NSMakeRect((CGFloat[]){12,150,280,386}[i],0,130,16);[content addSubview:t];}
+ scroll.hidden=self.pages.count>0;[self.pages addObject:scroll];return content;
 }
+-(void)showPage:(NSSegmentedControl *)sender{for(NSUInteger i=0;i<self.pages.count;i++)self.pages[i].hidden=(NSInteger)i!=sender.selectedSegment;}
 -(void)refresh{
  for(unsigned i=0;i<CONTROLS_KEYS;i++)[self.keyTargets[i] selectItemAtIndex:draft.keys[i]];
  for(unsigned i=0;i<CONTROLLER_BUTTONS;i++){
@@ -109,43 +106,53 @@ static TOTKControlsEditor *controlsEditor;
  if(self.panel||textEntryOpen||window.attachedSheet)return;
  NSError *error=nil;if(![self loadLayout:&error]){NSAlert *alert=[NSAlert new];alert.messageText=@(TOTK_UI("无法读取按键布局","Cannot read bindings"));alert.informativeText=error.localizedDescription;[alert beginSheetModalForWindow:window completionHandler:nil];return;}
  self.page=page;self.actions=page==CONTROLS_PAGE_CONTROLLER&&actionEditor&&runtime_action_bindings_supported()&&![actionEditor load];
- self.panel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,660,580) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
- self.panel.title=page==CONTROLS_PAGE_KEYBOARD?@(TOTK_UI("键鼠","Keyboard and Mouse")):page==CONTROLS_PAGE_CONTROLLER?@(TOTK_UI("手柄","Controller")):@(TOTK_UI("按键绑定","Input Bindings"));
+ CGFloat w=PANEL_W-2*PANEL_MARGIN,h=600,top=h-PANEL_SHEET_TOP;
+ self.panel=panel_sheet(page==CONTROLS_PAGE_KEYBOARD?@(TOTK_UI("键鼠","Keyboard and Mouse")):page==CONTROLS_PAGE_CONTROLLER?@(TOTK_UI("手柄","Controller")):@(TOTK_UI("按键绑定","Input Bindings")),PANEL_W,h);
  NSView *view=self.panel.contentView;
- controls_label(view,@(TOTK_UI("键盘、手柄与鼠标共用 controls.txt；应用后立即生效。","Keyboard, controller and mouse share controls.txt. Apply takes effect now.")),NSMakeRect(16,542,630,24));
- self.padType=nil;
+ panel_note(view,page==CONTROLS_PAGE_CONTROLLER?@(TOTK_UI("键盘、手柄与鼠标共用 controls.txt；应用后立即生效。","Keyboard, controller and mouse share controls.txt. Apply takes effect now.")):
+  @(TOTK_UI("键盘、手柄与鼠标共用 controls.txt；应用后立即生效。改键同时影响游戏和菜单；1–9 与 Command 保留给应用。鼠标开关在设置中。","Keyboard, controller and mouse share controls.txt; Apply takes effect now. Bindings affect gameplay and menus; keys 1–9 and Command stay reserved. Mouse mode is in Settings.")),
+  NSMakeRect(PANEL_MARGIN+4,top-30,w-8,30));
+ CGFloat y=top-38;self.padType=nil;
  if(page==CONTROLS_PAGE_CONTROLLER){
-  controls_label(view,@(TOTK_UI("手柄类型（按键图标）","Controller type (button icons)")),NSMakeRect(16,516,250,24));
-  NSPopUpButton *type=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(282,512,280,28) pullsDown:NO];
-  [type addItemsWithTitles:@[settings_pad_auto_text(),@"Xbox",@"PlayStation",@"Switch"]];
+  NSView *band=panel_band(view,NSMakeRect(PANEL_MARGIN,y-PANEL_ROW_H,w,PANEL_ROW_H));y-=PANEL_ROW_H+10;
+  panel_label(band,@(TOTK_UI("手柄类型（按键图标）","Controller type (button icons)")),12,w-260-26,PANEL_ROW_H);
+  NSPopUpButton *type=panel_popup(band,@[settings_pad_auto_text(),@"Xbox",@"PlayStation",@"Switch"],w-260-8,260,PANEL_ROW_H);
   int tags[]={GAMEPAD_TYPE_AUTO,GAMEPAD_TYPE_XBOX,GAMEPAD_TYPE_PLAYSTATION,GAMEPAD_TYPE_SWITCH};
   for(int i=0;i<4;i++)[type itemAtIndex:i].tag=tags[i];
-  [type selectItemWithTag:runtime_gamepad_type(NULL)];[view addSubview:type];self.padType=type;
- }else controls_label(view,@(TOTK_UI("改键同时影响游戏和菜单；1–9 与 Command 保留给应用。鼠标开关在设置中。","Bindings affect gameplay and menus; keys 1–9 and Command stay reserved. Mouse mode is in Settings.")),NSMakeRect(16,518,630,24));
- NSTabView *tabs=[[NSTabView alloc] initWithFrame:NSMakeRect(16,78,628,432)];[view addSubview:tabs];
+  [type selectItemWithTag:runtime_gamepad_type(NULL)];self.padType=type;
+ }
+ /* The segments, as the tabs were: the keyboard (not on the controller sheet), the buttons, the player actions. */
+ NSMutableArray *names=[NSMutableArray array];if(page!=CONTROLS_PAGE_CONTROLLER)[names addObject:@(TOTK_UI("键盘（Mac 实体键位）","Keyboard (Mac physical keys)"))];
+ [names addObject:page==CONTROLS_PAGE_KEYBOARD?@(TOTK_UI("鼠标按键","Mouse buttons")):page==CONTROLS_PAGE_CONTROLLER?@(TOTK_UI("手柄按键","Controller buttons")):@(TOTK_UI("手柄与鼠标","Controller and Mouse"))];
+ if(self.actions)[names addObject:@(TOTK_UI("玩家动作","Player actions"))];
+ if(names.count>1){NSSegmentedControl *seg=[NSSegmentedControl segmentedControlWithLabels:names trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(showPage:)];
+  seg.selectedSegment=0;seg.refusesFirstResponder=YES;[seg sizeToFit];seg.frame=NSMakeRect(floor((PANEL_W-seg.frame.size.width)/2),y-24,seg.frame.size.width,24);[view addSubview:seg];y-=24+10;}
+ NSRect list=NSMakeRect(PANEL_MARGIN,86,w,y-86);self.pages=[NSMutableArray array];
  NSMutableArray *targets=[NSMutableArray arrayWithObject:@(TOTK_UI("未分配","None"))];for(unsigned i=1;i<=CONTROLS_TARGETS;i++)[targets addObject:@(controls_target_name(i))];
  self.keyTargets=[NSMutableArray array];
- NSView *keyboard=page==CONTROLS_PAGE_CONTROLLER?nil:[self scrollPage:tabs name:@(TOTK_UI("键盘（Mac 实体键位）","Keyboard (Mac physical keys)")) rows:CONTROLS_KEYS];
+ NSView *keyboard=page==CONTROLS_PAGE_CONTROLLER?nil:[self scrollPage:list rows:CONTROLS_KEYS header:nil];
  for(unsigned i=0;i<CONTROLS_KEYS;i++){
-  CGFloat y=i*32+6;if(keyboard)controls_label(keyboard,[NSString stringWithFormat:@"%@  (key_%u)",controls_key_label(i),i],NSMakeRect(16,y+2,250,24));
-  NSPopUpButton *p=[self popup:keyboard frame:NSMakeRect(282,y,280,28) names:targets tag:i action:@selector(keyChanged:)];p.enabled=!controls_key_reserved(i);[self.keyTargets addObject:p];
+  NSView *band=keyboard?panel_band(keyboard,NSMakeRect(0,i*(PANEL_ROW_H+PANEL_GAP),keyboard.frame.size.width,PANEL_ROW_H)):nil;
+  CGFloat bw=band.frame.size.width;if(band)panel_label(band,[NSString stringWithFormat:@"%@  (key_%u)",controls_key_label(i),i],12,bw-260-26,PANEL_ROW_H);
+  NSPopUpButton *p=[self popup:band x:bw-260-8 w:260 names:targets tag:i action:@selector(keyChanged:)];p.autoresizingMask=NSViewMinXMargin;p.enabled=!controls_key_reserved(i);[self.keyTargets addObject:p];
  }
  /* The controller's buttons and the mouse's (CONTROLLER_MOUSE_FIRST on) on their own pages in the panel's sheets. Rows a
     page leaves out keep their pop-ups off screen, so refresh and the draft see every button. */
  unsigned first=page==CONTROLS_PAGE_KEYBOARD?CONTROLLER_MOUSE_FIRST:0,last=page==CONTROLS_PAGE_CONTROLLER?CONTROLLER_MOUSE_FIRST:CONTROLLER_BUTTONS;
  self.padTargets=[NSMutableArray array];self.padModes=[NSMutableArray array];self.padFire=[NSMutableArray array];
- NSView *pad=[self scrollPage:tabs name:page==CONTROLS_PAGE_KEYBOARD?@(TOTK_UI("鼠标按键","Mouse buttons")):page==CONTROLS_PAGE_CONTROLLER?@(TOTK_UI("手柄按键","Controller buttons")):@(TOTK_UI("手柄与鼠标","Controller and Mouse")) rows:last-first];
+ NSView *pad=[self scrollPage:list rows:last-first header:@[@(TOTK_UI("按键","Button")),@(TOTK_UI("映射为","Sends")),@(TOTK_UI("方式","Mode")),@(TOTK_UI("瞄准时开火","Fires while aiming"))]];
  NSArray *buttons=[targets subarrayWithRange:NSMakeRange(0,17)];NSMutableArray *physical=[NSMutableArray array];for(unsigned i=0;i<CONTROLLER_BUTTONS;i++)[physical addObject:@(controller_physical_names[i])];
  for(unsigned i=0;i<CONTROLLER_BUTTONS;i++){
-  NSView *in=i>=first&&i<last?pad:nil;CGFloat y=(i-first)*32+6;if(in)controls_label(in,@(controller_physical_names[i]),NSMakeRect(12,y+2,130,24));
-  [self.padTargets addObject:[self popup:in frame:NSMakeRect(144,y,120,28) names:buttons tag:i action:@selector(padChanged:)]];
-  [self.padModes addObject:[self popup:in frame:NSMakeRect(270,y,108,28) names:@[@"hold",@"tap",@"toggle",@"aim"] tag:i action:@selector(padChanged:)]];
-  [self.padFire addObject:[self popup:in frame:NSMakeRect(384,y,184,28) names:physical tag:i action:@selector(padChanged:)]];
+  NSView *band=i>=first&&i<last?panel_band(pad,NSMakeRect(0,20+(i-first)*(PANEL_ROW_H+PANEL_GAP),pad.frame.size.width,PANEL_ROW_H)):nil;
+  if(band)panel_label(band,@(controller_physical_names[i]),12,128,PANEL_ROW_H);
+  [self.padTargets addObject:[self popup:band x:146 w:124 names:buttons tag:i action:@selector(padChanged:)]];
+  [self.padModes addObject:[self popup:band x:276 w:100 names:@[@"hold",@"tap",@"toggle",@"aim"] tag:i action:@selector(padChanged:)]];
+  NSPopUpButton *fire=[self popup:band x:382 w:pad.frame.size.width-8-382 names:physical tag:i action:@selector(padChanged:)];fire.autoresizingMask=NSViewWidthSizable;[self.padFire addObject:fire];
  }
- if(self.actions){NSView *actions=[self scrollPage:tabs name:@(TOTK_UI("玩家动作","Player actions")) rows:ACTION_BINDING_COUNT];[actionEditor addRowsTo:actions y0:6 step:32];}
- self.message=controls_label(view,@(TOTK_UI("hold：按住；tap：400 毫秒；toggle：切换；aim：按住瞄准、另一键射击。","hold: while down; tap: 400 ms; toggle: on/off; aim: hold to aim, another button fires.")),NSMakeRect(16,46,628,28));self.message.font=[NSFont systemFontOfSize:11];
- NSArray *titles=@[@(TOTK_UI("恢复默认","Reset Defaults")),@(TOTK_UI("取消","Cancel")),@(TOTK_UI("应用","Apply"))];SEL actions[]={@selector(reset:),@selector(cancel:),@selector(apply:)};
- for(unsigned i=0;i<3;i++){NSButton *b=[NSButton buttonWithTitle:titles[i] target:self action:actions[i]];b.frame=NSMakeRect(i?438+(i-1)*102:16,10,i?96:160,30);if(i==1)b.keyEquivalent=@"\e";if(i==2)b.keyEquivalent=@"\r";[view addSubview:b];}
+ if(self.actions)[actionEditor addRowsTo:[self scrollPage:list rows:ACTION_BINDING_COUNT header:nil] y0:0];
+ self.message=panel_note(view,@(TOTK_UI("hold：按住；tap：400 毫秒；toggle：切换；aim：按住瞄准、另一键射击。","hold: while down; tap: 400 ms; toggle: on/off; aim: hold to aim, another button fires.")),NSMakeRect(PANEL_MARGIN+4,48,w-8,30));
+ SEL actions[]={@selector(reset:),@selector(cancel:),@selector(apply:)};
+ panel_buttons(view,PANEL_W,@[@(TOTK_UI("恢复默认","Reset Defaults")),@(TOTK_UI("取消","Cancel")),@(TOTK_UI("应用","Apply"))],self,actions);
  [self refresh];controlsOpen=YES;runtime_input_suspend(1);front_mouse_update();
  [window beginSheet:self.panel completionHandler:^(NSModalResponse response){(void)response;[self.panel orderOut:nil];self.panel=nil;controlsOpen=NO;runtime_input_suspend(0);front_mouse_update();
   if(self.actions)[actionEditor noticeRestart];}];

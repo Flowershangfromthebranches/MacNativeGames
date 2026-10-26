@@ -362,7 +362,7 @@ static NSArray<NSArray<TOTKSettingRow *> *> *settings_lines(void) {
  return lines;
 }
 
-enum { SETTINGS_W = 600, SETTINGS_ROW_H = 34, SETTINGS_GAP = 6, SETTINGS_TOP = 54, SETTINGS_BOTTOM = 86, SETTINGS_POP_W = 260,
+enum { SETTINGS_W = PANEL_W, SETTINGS_ROW_H = PANEL_ROW_H, SETTINGS_GAP = PANEL_GAP, SETTINGS_TOP = 54, SETTINGS_BOTTOM = 86, SETTINGS_POP_W = 260,
        SETTINGS_HALF_POP_W = 150, SETTINGS_INDENT = 18 };
 /* One line at (x, y), w wide: one setting across, or two side by side, each on its own band. */
 static void settings_place(NSView *view, NSArray<TOTKSettingRow *> *line, CGFloat x, CGFloat y, CGFloat w, CGFloat h) {
@@ -370,8 +370,7 @@ static void settings_place(NSView *view, NSArray<TOTKSettingRow *> *line, CGFloa
  CGFloat cw=line.count>1?floor((w-8)/2):w;
  for(NSUInteger c=0;c<line.count;c++){
   TOTKSettingRow *r=line[c];
-  NSView *band=[[NSView alloc] initWithFrame:NSMakeRect(x+c*(cw+8),y,cw,h)];band.wantsLayer=YES;
-  band.layer.backgroundColor=[NSColor colorWithCalibratedWhite:0 alpha:0.28].CGColor;band.layer.cornerRadius=6;[view addSubview:band];
+  NSView *band=panel_band(view,NSMakeRect(x+c*(cw+8),y,cw,h));
   if(r.note){NSTextField *t=[NSTextField labelWithString:@""];t.font=[NSFont systemFontOfSize:12];t.textColor=[NSColor colorWithCalibratedWhite:0.75 alpha:1];
    t.lineBreakMode=NSLineBreakByTruncatingTail;t.frame=NSMakeRect(12,floor((h-16)/2),cw-24,16);[band addSubview:t];r.control=t;continue;}
   CGFloat right;   /* where the control starts: the title takes the room to its left */
@@ -384,25 +383,17 @@ static void settings_place(NSView *view, NSArray<TOTKSettingRow *> *line, CGFloa
   else{CGFloat pw=line.count>1?SETTINGS_HALF_POP_W:SETTINGS_POP_W;right=cw-pw-8;
    NSPopUpButton *p=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(right,floor((h-26)/2),pw,26) pullsDown:NO];[p addItemsWithTitles:r.choices];r.control=p;}
   if(!r.buttons){r.control.refusesFirstResponder=YES;r.control.target=r;r.control.action=@selector(changed:);[band addSubview:r.control];}
-  NSTextField *label=[NSTextField labelWithString:r.title];label.font=[NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
-  label.textColor=[NSColor colorWithCalibratedWhite:0.92 alpha:1];label.lineBreakMode=NSLineBreakByTruncatingTail;
-  label.frame=NSMakeRect(12,floor((h-18)/2),fmax(0,right-18),18);[band addSubview:label];
+  panel_label(band,r.title,12,right-18,h);
  }
-}
-static NSView *settings_dark(NSView *view) {
- view.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];view.wantsLayer=YES;
- view.layer.backgroundColor=[NSColor colorWithCalibratedRed:0.10 green:0.16 blue:0.20 alpha:0.9].CGColor;return view;
 }
 
 @implementation TOTKGameplaySheet
 -(void)open{
  if(self.panel||!window||window.attachedSheet)return;
- self.rows=settings_gameplay_rows();CGFloat n=self.rows.count,h=20+n*(SETTINGS_ROW_H+SETTINGS_GAP)-SETTINGS_GAP+56;
- self.panel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,SETTINGS_W,h) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
- self.panel.title=settings_text("游戏性设置","Gameplay");NSView *view=settings_dark(self.panel.contentView);
- for(NSUInteger i=0;i<self.rows.count;i++)settings_place(view,@[self.rows[i]],14,h-20-(i+1)*SETTINGS_ROW_H-i*SETTINGS_GAP,SETTINGS_W-28,SETTINGS_ROW_H);
- NSButton *done=[NSButton buttonWithTitle:settings_text("完成","Done") target:self action:@selector(done:)];done.keyEquivalent=@"\r";
- done.frame=NSMakeRect(SETTINGS_W-14-100,12,100,30);[view addSubview:done];
+ self.rows=settings_gameplay_rows();CGFloat n=self.rows.count,h=PANEL_SHEET_TOP+n*(SETTINGS_ROW_H+SETTINGS_GAP)-SETTINGS_GAP+56;
+ self.panel=panel_sheet(settings_text("游戏性设置","Gameplay"),SETTINGS_W,h);NSView *view=self.panel.contentView;
+ for(NSUInteger i=0;i<self.rows.count;i++)settings_place(view,@[self.rows[i]],14,h-PANEL_SHEET_TOP-(i+1)*SETTINGS_ROW_H-i*SETTINGS_GAP,SETTINGS_W-28,SETTINGS_ROW_H);
+ SEL done=@selector(done:);panel_buttons(view,SETTINGS_W,@[settings_text("完成","Done")],self,&done);
  NSButton *esc=[NSButton buttonWithTitle:@"" target:self action:@selector(done:)];esc.keyEquivalent=@"\e";esc.frame=NSMakeRect(-100,-100,10,10);   /* Esc closes it too, off screen */[view addSubview:esc];
  [self refresh];__weak TOTKGameplaySheet *weak=self;
  self.timer=[NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *t){(void)t;[weak refresh];}];
@@ -433,7 +424,7 @@ static NSPoint g_settings_at = {-1, -1};
  CGFloat h=SETTINGS_TOP+n*(rowH+gap)-gap+SETTINGS_BOTTOM;
  if(!(self=[super initWithFrame:NSMakeRect(0,0,SETTINGS_W,h)]))return nil;
  NSMutableArray<TOTKSettingRow *> *rows=[NSMutableArray array];for(NSArray *line in lines)[rows addObjectsFromArray:line];
- self.rows=rows;settings_dark(self);
+ self.rows=rows;panel_dark(self);
  self.layer.cornerRadius=12;self.layer.borderWidth=1;self.layer.borderColor=[NSColor colorWithCalibratedWhite:1 alpha:0.12].CGColor;
  self.autoresizingMask=NSViewMinXMargin|NSViewMaxXMargin|NSViewMinYMargin|NSViewMaxYMargin;
  NSTextField *title=[NSTextField labelWithString:settings_text("设置","Settings")];title.font=[NSFont systemFontOfSize:17 weight:NSFontWeightSemibold];

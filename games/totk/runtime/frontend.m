@@ -186,6 +186,7 @@ static void front_mouse_update(void){   /* main thread; also runtime/gamepad.m's
  }
  fprintf(stderr,"[totk] mouse %s\n",want?"held by the window (the settings panel, key 1, or Command-Tab lets it go)":"let go");
 }
+#include "panel_style.h"
 #include "action_editor.h"
 #include "controls_editor.h"
 @interface TOTKHudBox:NSView

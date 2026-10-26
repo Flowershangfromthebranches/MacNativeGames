@@ -122,6 +122,10 @@ static NSString *note(void) {   /* the line beside the interpolation switch */
 }
 static BOOL switched(NSString *title) { [settingsPanel.timer fire]; [gameplaySheet refresh]; return ((NSSwitch *)row(title).control).state == NSControlStateValueOn; }
 
+static void dump(NSView *view, const char *path, NSString *suffix) {
+    NSBitmapImageRep *rep = [view bitmapImageRepForCachingDisplayInRect:view.bounds]; [view cacheDisplayInRect:view.bounds toBitmapImageRep:rep];
+    assert([[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:[@(path) stringByAppendingString:suffix] atomically:YES]);
+}
 int main(int argc, const char **argv) { @autoreleasepool {
     [NSApplication sharedApplication];
     setenv("TOTK_OUTPUT_RES", "2560x1440", 1);   /* the native size the resolution row names */
@@ -286,6 +290,11 @@ int main(int argc, const char **argv) { @autoreleasepool {
     char folder[] = "/tmp/totk-controls-XXXXXX"; assert(mkdtemp(folder));
     NSString *controls = [@(folder) stringByAppendingPathComponent:@"controls.txt"]; setenv("TOTK_CONTROLS", controls.fileSystemRepresentation, 1);
     settings_open_controls(0); tick(); assert(controlsEditor.panel && controlsEditor.padType);
+    if (argc == 2) {
+        dump(controlsEditor.panel.contentView, argv[1], @".controller.png");
+        if (controlsEditor.pages.count > 1) { for (NSScrollView *page in controlsEditor.pages) page.hidden = page != controlsEditor.pages.lastObject;
+            dump(controlsEditor.panel.contentView, argv[1], @".actions.png"); }
+    }
     assert([controlsEditor.padType.titleOfSelectedItem isEqualToString:@"Auto (PlayStation)"]);
     [controlsEditor.padType selectItemWithTitle:@"Switch"]; [controlsEditor apply:nil]; tick();
     assert(fakePadType == GAMEPAD_TYPE_SWITCH && controllerLayouts == 1 && !controlsEditor.panel && !window.attachedSheet);
@@ -297,6 +306,7 @@ int main(int argc, const char **argv) { @autoreleasepool {
     NSString *actions = [@(folder) stringByAppendingPathComponent:@"player-actions.txt"];
     assert(![[NSFileManager defaultManager] fileExistsAtPath:actions]);
     settings_open_controls(1); tick(); assert(controlsEditor.panel && !controlsEditor.padType && [controlsEditor.panel.title isEqualToString:@"Keyboard and Mouse"]);
+    if (argc == 2) dump(controlsEditor.panel.contentView, argv[1], @".keyboard.png");
     [controlsEditor cancel:nil]; tick();
     [[NSFileManager defaultManager] removeItemAtPath:@(folder) error:nil]; unsetenv("TOTK_CONTROLS");
     fakePadDetected = -1;

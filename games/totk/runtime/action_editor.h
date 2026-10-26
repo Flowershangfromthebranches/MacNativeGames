@@ -14,7 +14,7 @@
 -(void)reset:(id)sender;
 -(NSString *)load;
 -(NSString *)save;
--(void)addRowsTo:(NSView *)view y0:(CGFloat)y0 step:(CGFloat)step;
+-(void)addRowsTo:(NSView *)view y0:(CGFloat)y0;
 -(void)noticeRestart;
 @end
 static TOTKActionEditor *actionEditor;
@@ -53,12 +53,13 @@ static TOTKActionEditor *actionEditor;
  }
  runtime_action_bindings_get(&draft);return nil;
 }
-/* One row per source button, the first at y0 and each next one step further (negative in an unflipped view). */
--(void)addRowsTo:(NSView *)view y0:(CGFloat)y0 step:(CGFloat)step{
+/* One band per source button in a flipped list (panel_scroll), the first at y0. */
+-(void)addRowsTo:(NSView *)view y0:(CGFloat)y0{
  self.targets=[NSMutableArray array];NSMutableArray *names=[NSMutableArray array];for(unsigned j=0;j<action_binding_code_count();j++)[names addObject:@(action_binding_name(action_binding_code_at(j)))];
+ CGFloat w=view.frame.size.width,pw=320;
  for(unsigned i=0;i<ACTION_BINDING_COUNT;i++){
-  CGFloat y=y0+i*step;NSTextField *label=[NSTextField labelWithString:@(action_binding_source_name(i))];label.frame=NSMakeRect(18,y+2,150,24);[view addSubview:label];
-  NSPopUpButton *p=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(174,y,346,28) pullsDown:NO];[p addItemsWithTitles:names];[p selectItemAtIndex:action_binding_code_index(draft.target[i])];p.tag=i;p.target=self;p.action=@selector(changed:);[view addSubview:p];[self.targets addObject:p];
+  NSView *band=panel_band(view,NSMakeRect(0,y0+i*(PANEL_ROW_H+PANEL_GAP),w,PANEL_ROW_H));panel_label(band,@(action_binding_source_name(i)),12,w-pw-26,PANEL_ROW_H);
+  NSPopUpButton *p=panel_popup(band,names,w-pw-8,pw,PANEL_ROW_H);[p selectItemAtIndex:action_binding_code_index(draft.target[i])];p.autoresizingMask=NSViewMinXMargin;p.tag=i;p.target=self;p.action=@selector(changed:);[self.targets addObject:p];
  }
 }
 -(void)noticeRestart{
@@ -69,12 +70,14 @@ static TOTKActionEditor *actionEditor;
  (void)sender;if(self.panel||textEntryOpen||window.attachedSheet)return;
  NSString *problem=[self load];
  if(problem){NSAlert *alert=[NSAlert new];alert.messageText=problem;[alert beginSheetModalForWindow:window completionHandler:nil];return;}
- self.panel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,540,642) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];self.panel.title=@(TOTK_UI("玩家动作（独立于菜单）","Player Actions (independent of menus)"));NSView *view=self.panel.contentView;
- NSTextField *intro=[NSTextField wrappingLabelWithString:@(TOTK_UI("来源是游戏看到的按键。只改场景动作，菜单确认、返回和切页保持原样；首次启用需重启。","Sources are game-visible buttons. Only gameplay actions change; menu confirm/back/tabs stay original. First use needs a restart."))];intro.frame=NSMakeRect(16,572,508,56);[view addSubview:intro];
- [self addRowsTo:view y0:542 step:-30];
- self.message=[NSTextField wrappingLabelWithString:runtime_action_bindings_available()?@(TOTK_UI("应用后立即生效。","Apply updates live gameplay.")):@(TOTK_UI("保存后重新启动游戏，以安装动作转换。","Save, then restart to install action translation."))];self.message.frame=NSMakeRect(16,40,508,42);[view addSubview:self.message];
- NSArray *titles=@[@(TOTK_UI("恢复默认","Reset Defaults")),@(TOTK_UI("取消","Cancel")),@(TOTK_UI("应用","Apply"))];SEL actions[]={@selector(reset:),@selector(cancel:),@selector(apply:)};
- for(unsigned i=0;i<3;i++){NSButton *b=[NSButton buttonWithTitle:titles[i] target:self action:actions[i]];b.frame=NSMakeRect(i?330+(i-1)*98:16,8,i?92:150,30);if(i==1)b.keyEquivalent=@"\e";if(i==2)b.keyEquivalent=@"\r";[view addSubview:b];}
+ CGFloat h=600,top=h-PANEL_SHEET_TOP;
+ self.panel=panel_sheet(@(TOTK_UI("玩家动作（独立于菜单）","Player Actions (independent of menus)")),PANEL_W,h);NSView *view=self.panel.contentView;
+ panel_note(view,@(TOTK_UI("来源是游戏看到的按键。只改场景动作，菜单确认、返回和切页保持原样；首次启用需重启。","Sources are game-visible buttons. Only gameplay actions change; menu confirm/back/tabs stay original. First use needs a restart.")),NSMakeRect(PANEL_MARGIN+4,top-30,PANEL_W-2*PANEL_MARGIN-8,30));
+ CGFloat list=top-38-86;
+ [self addRowsTo:panel_scroll(view,NSMakeRect(PANEL_MARGIN,86,PANEL_W-2*PANEL_MARGIN,list),ACTION_BINDING_COUNT*(PANEL_ROW_H+PANEL_GAP)-PANEL_GAP,NULL) y0:0];
+ self.message=panel_note(view,runtime_action_bindings_available()?@(TOTK_UI("应用后立即生效。","Apply updates live gameplay.")):@(TOTK_UI("保存后重新启动游戏，以安装动作转换。","Save, then restart to install action translation.")),NSMakeRect(PANEL_MARGIN+4,48,PANEL_W-2*PANEL_MARGIN-8,30));
+ SEL actions[]={@selector(reset:),@selector(cancel:),@selector(apply:)};
+ panel_buttons(view,PANEL_W,@[@(TOTK_UI("恢复默认","Reset Defaults")),@(TOTK_UI("取消","Cancel")),@(TOTK_UI("应用","Apply"))],self,actions);
  actionEditorOpen=YES;runtime_input_suspend(1);front_mouse_update();
  [window beginSheet:self.panel completionHandler:^(NSModalResponse response){(void)response;[self.panel orderOut:nil];self.panel=nil;actionEditorOpen=NO;runtime_input_suspend(0);front_mouse_update();[self noticeRestart];}];
 }
