@@ -20,7 +20,7 @@ void runtime_hle_trace_set(int mode){(void)mode;runtime_fail("unexpected host-ca
 void runtime_frame_step_pin(double ms){(void)ms;runtime_fail("unexpected frame step pin in unit probe");}
 void runtime_front_text_test(const char *op,const char *text){(void)op;(void)text;runtime_fail("unexpected keyboard test in unit probe");}
 int runtime_output_res_toggle(void){runtime_fail("unexpected output size switch in unit probe");return 0;}
-void runtime_shortcut_help_toggle(void){help_toggles++;}
+void runtime_settings_toggle(void){help_toggles++;}   // key 1 (main: the settings panel)
 int runtime_output_mode_cycle(void){output_cycles++;return 1;}
 int runtime_aspect_toggle(void){aspect_toggles++;return 1;}
 void taa_toggle(void){taa_toggles++;}
