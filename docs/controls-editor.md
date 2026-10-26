@@ -82,3 +82,9 @@ installed apps, desktop entry and original profile were left in place.
 Since #460 is still open, this PR carries only its shared `prompt_layout.py` and
 C/Python parity probes with the keyboard-line compatibility change. Keep these
 versions of those files when combining the PRs; the rest of #460 is not imported.
+
+Before publishing, main advanced to `84eebcd` (#523 feedback settings, #477
+DualSense triggers, #511 sampled copies). It was merged with all new settings
+preserved. The three affected controls/AppKit probes and the full macOS 1.4.3
+runtime build passed again; the earlier retail game run is on the `10144b0`
+integration and is not presented as another game run after this final sync.

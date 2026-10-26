@@ -47,6 +47,18 @@ int runtime_gamepad_type_set(int type){return type;}
 int runtime_mouse_set(int on){return on;}
 void nvn_fps_lock_set(int fps){(void)fps;}
 int nvn_fps_lock(void){return 0;}
+/* The settings panel is linked but not exercised by this close/editor probe. */
+int runtime_feedback_locked(int gyro){(void)gyro;return 0;}
+int runtime_feedback_present(int gyro){(void)gyro;return 0;}
+int runtime_feedback_choice(int gyro){(void)gyro;return 0;}
+void runtime_feedback_choose(int gyro,int on){(void)gyro;(void)on;}
+int runtime_rumble_gain_locked(void){return 0;}
+float runtime_rumble_gain(void){return 1;}
+void runtime_rumble_gain_set(float gain){(void)gain;}
+int runtime_triggers_available(void){return 0;}
+int runtime_triggers_locked(void){return 0;}
+int runtime_triggers_choice(void){return 0;}
+void runtime_triggers_choose(int on){(void)on;}
 
 static NSEvent *key(NSEventModifierFlags flags){
  return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0
