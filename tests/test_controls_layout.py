@@ -19,7 +19,7 @@ class ControlsLayoutTests(unittest.TestCase):
             sources=['scripts/input_probe.c','runtime/input.c','runtime/hid_feedback.c','runtime/motion_fusion.c','runtime/autoload.c']
             build=subprocess.run(['xcrun','clang','-std=c11','-O1','-Wall','-Wextra','-Werror',*[str(ROOT/'games/totk'/s) for s in sources],'-o',str(exe)],capture_output=True,text=True)
             self.assertEqual(build.returncode,0,build.stderr)
-            run=subprocess.run([str(exe)],capture_output=True,text=True,env={k:v for k,v in os.environ.items() if not k.startswith('TOTK_')},timeout=30)
+            run=subprocess.run([str(exe),"--controls-only"],capture_output=True,text=True,env={k:v for k,v in os.environ.items() if not k.startswith('TOTK_')},timeout=30)
             self.assertEqual(run.returncode,0,run.stdout+run.stderr)
 
     @unittest.skipUnless(os.environ.get('TOTK_RUN_APPKIT_PROBES')=='1','opt-in native AppKit sheet probe')

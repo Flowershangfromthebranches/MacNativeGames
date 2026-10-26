@@ -96,7 +96,7 @@ static TOTKControlsEditor *controlsEditor;
  self.panel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,660,580) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];self.panel.title=@(TOTK_UI("按键绑定","Input Bindings"));
  NSView *view=self.panel.contentView;
  controls_label(view,@(TOTK_UI("键盘、手柄与鼠标共用 controls.txt；应用后立即生效。","Keyboard, controller and mouse share controls.txt. Apply takes effect now.")),NSMakeRect(16,542,630,24));
- controls_label(view,@(TOTK_UI("鼠标仍用 7 键开关。改键同时影响游戏和菜单；1–7 保留为快捷键。","Key 7 toggles mouse mode. Bindings affect gameplay and menus; keys 1–7 stay shortcuts.")),NSMakeRect(16,518,630,24));
+ controls_label(view,@(TOTK_UI("改键同时影响游戏和菜单；1–9 与 Command 保留给应用。鼠标开关在设置中。","Bindings affect gameplay and menus; keys 1–9 and Command stay reserved. Mouse mode is in Settings.")),NSMakeRect(16,518,630,24));
  NSTabView *tabs=[[NSTabView alloc] initWithFrame:NSMakeRect(16,78,628,432)];[view addSubview:tabs];
  NSMutableArray *targets=[NSMutableArray arrayWithObject:@(TOTK_UI("未分配","None"))];for(unsigned i=1;i<=CONTROLS_TARGETS;i++)[targets addObject:@(controls_target_name(i))];
  self.keyTargets=[NSMutableArray array];NSView *keyboard=[self scrollPage:tabs name:@(TOTK_UI("键盘（Mac 实体键位）","Keyboard (Mac physical keys)")) rows:CONTROLS_KEYS];

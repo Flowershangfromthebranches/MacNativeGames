@@ -14,7 +14,7 @@ static inline const char *controls_target_name(unsigned target) {
     return !target ? "none" : target<=16 ? controller_switch_names[target-1] : target<=24 ? controls_axis_names[target-17] : NULL;
 }
 static inline int controls_key_reserved(unsigned k) {
-    return k==18||k==19||k==20||k==21||k==22||k==23||k==26||k==54||k==55; /* 1..7, Command */
+    return k==18||k==19||k==20||k==21||k==22||k==23||k==25||k==26||k==28||k==54||k==55; /* 1..9 (8: HDR, 9: frame cap), Command */
 }
 static inline void controls_layout_default(ControlsLayout *b) {
     controller_map_default(b->map,b->modes); memset(b->keys,0,sizeof b->keys);

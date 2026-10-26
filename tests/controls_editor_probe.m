@@ -19,6 +19,9 @@ int main(int argc,char **argv){@autoreleasepool{
  assert([@"key_18 = a" writeToFile:file atomically:YES encoding:NSUTF8StringEncoding error:&error]);assert(![editor loadLayout:&error]);
  assert([initial writeToFile:file atomically:YES encoding:NSUTF8StringEncoding error:&error]);
  [editor open:nil];assert(editor.panel&&controlsOpen&&editor.keyTargets.count==128&&editor.padTargets.count==22);
+ const unsigned reserved[]={18,19,20,21,22,23,25,26,28,54,55};
+ for(unsigned i=0;i<sizeof reserved/sizeof *reserved;i++)assert(!editor.keyTargets[reserved[i]].enabled);
+ assert(editor.keyTargets[29].enabled&&editor.keyTargets[7].enabled); /* 0 and X remain editable */
  [editor reset:nil];assert(editor->draft.keys[38]==1&&editor->draft.map[0]==2);
  [editor.panel orderFront:nil];[NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.15]];[editor.panel display];NSView *content=editor.panel.contentView;NSBitmapImageRep *bitmap=[content bitmapImageRepForCachingDisplayInRect:content.bounds];[content cacheDisplayInRect:content.bounds toBitmapImageRep:bitmap];
  [[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:[folder stringByAppendingPathComponent:@"editor.png"] atomically:YES];
