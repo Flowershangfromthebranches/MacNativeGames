@@ -280,7 +280,7 @@ static void front_sync_drawable(void){
 void runtime_front_resize_aspect(double ratio){
  if(!isfinite(ratio)||ratio<0.5||ratio>8)return;
  dispatch_async(dispatch_get_main_queue(), ^{
-  if(!window||(window.styleMask&NSWindowStyleMaskFullScreen))return;
+  if(!window||(window.styleMask&(NSWindowStyleMaskFullScreen|NSWindowStyleMaskTitled))!=NSWindowStyleMaskTitled)return;   /* full screen and borderless keep the screen */
   NSScreen *screen=window.screen?:NSScreen.mainScreen;if(!screen)return;
   static NSSize lastSize;static CGFloat preferredHeight;
   NSRect oldFrame=window.frame;NSSize current=window.contentView.bounds.size;

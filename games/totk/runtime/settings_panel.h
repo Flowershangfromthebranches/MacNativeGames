@@ -242,6 +242,7 @@ static int settings_display_hz(void) {
 static NSString *settings_fi_note(void) {
  if(mfx_requested()==MFX_OFF)return settings_text("关：只显示游戏自己的帧","Off: the game's own frames only");
  int lock=nvn_fps_lock(),hz=settings_display_hz(),half=MAX(30,hz/2);
+ if(lock&&2*lock>hz)return [NSString stringWithFormat:@(TOTK_UI("按帧率上限补：%d + %d = %d 帧（超过屏幕 %d Hz）","At the limit: %d + %d = %d fps (above the %d Hz screen)")),lock,lock,2*lock,hz];
  if(lock)return [NSString stringWithFormat:@(TOTK_UI("按帧率上限补：%d + %d = %d 帧","At the limit: %d + %d = %d fps")),lock,lock,2*lock];
  return [NSString stringWithFormat:@(TOTK_UI("自适应：最高 %d + %d（屏幕 %d Hz）","Adaptive: up to %d + %d (%d Hz screen)")),half,half,hz];
 }

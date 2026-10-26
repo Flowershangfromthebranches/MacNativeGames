@@ -178,8 +178,11 @@ int main(int argc, const char **argv) { @autoreleasepool {
     flip(@"Vertical sync", NO); assert(!fakeVsync);   /* stays asked for, shown on while interpolating */
     assert(switched(@"Vertical sync") && !menu(@"Vertical sync").enabled);
     pick(@"Frame rate limit", @"40 fps"); assert(fakeLock == 40 && mfx_requested() == MFX_MAX);
-    assert([note() isEqualToString:@"At the limit: 40 + 40 = 80 fps"]);
-    nvn_fps_lock_set(45); assert([note() isEqualToString:@"At the limit: 45 + 45 = 90 fps"]);
+    assert([note() hasPrefix:@"At the limit: 40 + 40 = 80 fps"]);
+    nvn_fps_lock_set(45); assert([note() hasPrefix:@"At the limit: 45 + 45 = 90 fps"]);
+    assert([note() hasSuffix:@"screen)"] == (90 > settings_display_hz()));   /* more than the screen shows: said so */
+    nvn_fps_lock_set(240); assert(([note() hasSuffix:[NSString stringWithFormat:@"(above the %d Hz screen)", settings_display_hz()]]));
+    nvn_fps_lock_set(45);
     flip(@"Frame interpolation", NO); assert(mfx_requested() == MFX_OFF && fakeLock == 45);
     assert(!switched(@"Vertical sync") && menu(@"Vertical sync").enabled);
     flip(@"Vertical sync", YES); pick(@"Frame rate limit", @"Off"); mfx_latch();
@@ -322,7 +325,7 @@ int main(int argc, const char **argv) { @autoreleasepool {
     setenv("TOTK_UI_LANG", "zh", 1); press(18); assert(settingsOpen);
     shows(@"分辨率", @"1080p"); shows(@"帧率上限", @"关"); shows(@"窗口模式", @"窗口");
     flip(@"补帧（自适应）", YES); assert(mfx_requested() == MFX_MAX && [note() hasPrefix:@"自适应：最高 "]);
-    nvn_fps_lock_set(50); assert([note() isEqualToString:@"按帧率上限补：50 + 50 = 100 帧"]); shows(@"帧率上限", @"自定义（50 帧）");
+    nvn_fps_lock_set(50); assert([note() hasPrefix:@"按帧率上限补：50 + 50 = 100 帧"]); shows(@"帧率上限", @"自定义（50 帧）");
     flip(@"补帧（自适应）", NO); nvn_fps_lock_set(0);
     gameplay(); assert(switched(@"DualSense 拉弓扳机")); shows(@"震动强度", @"1×（默认）"); assert(switched(@"震动") && switched(@"体感瞄准"));
     [gameplaySheet done:nil]; tick();
