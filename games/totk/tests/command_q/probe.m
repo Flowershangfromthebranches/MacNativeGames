@@ -47,6 +47,12 @@ int runtime_aspect_set_ratio(float r){(void)r;return 0;}
 float runtime_aspect_ratio(void){return 0;}
 float runtime_aspect_start(void){return 0;}
 int runtime_output_native(int mode,unsigned *w,unsigned *h){(void)mode;(void)w;(void)h;return 0;}
+int runtime_picture_canvas_max(unsigned *w,unsigned *h){(void)w;(void)h;return 0;}
+int runtime_picture_presets(void){return 0;}
+int runtime_picture_preset(void){return 0;}
+int runtime_picture_set(unsigned w,unsigned h,int preset){(void)w;(void)h;(void)preset;return 0;}
+uint64_t runtime_output_size_current(void){return (uint64_t)1080<<32|1920;}
+int dm_gfx_vsync(void){return 1;}
 int runtime_gamepad_type_set(int type){return type;}
 int runtime_mouse_set(int on){return on;}
 void nvn_fps_lock_set(int fps){(void)fps;}

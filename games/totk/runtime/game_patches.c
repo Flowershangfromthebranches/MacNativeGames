@@ -468,6 +468,19 @@ int runtime_output_mode_set(int mode) {
             mode == OUTPUT_MODE_METALFX ? "MetalFX 2K" : "off (1080p)");
     return 1;
 }
+/* The settings panel's picture (runtime.h): any canvas up to the swapchain; the scene keeps the size the game read at the
+   start (1.0.0 renders it from that size), so no MetalFX presets here. */
+int runtime_picture_canvas_max(unsigned *w, unsigned *h) { if (!output_page) return 0; *w = output_w; *h = output_h; return 1; }
+int runtime_picture_presets(void) { return 0; }
+int runtime_picture_preset(void) { return PICTURE_PRESET_OFF; }
+int runtime_picture_set(unsigned w, unsigned h, int preset) {
+    extern void dm_gfx_set_flag(const char *name, int value);
+    if (!output_page || preset || w < 640 || h < 360 || w > output_w || h > output_h) return 0;
+    output_size_set(pack_size(w, h));
+    dm_gfx_set_flag("mfx_output", 0); dm_gfx_set_flag("mfx_upscale", 0);
+    fprintf(stderr, "[totk] picture: canvas %ux%u\n", w, h);
+    return 1;
+}
 
 /* Diagnostic (Mac): TOTK_TRAP_AT=<main offset> writes brk #0 there; the crash handler (runtime/loader.c, SIGTRAP) then prints
    the registers and the call chain at that moment, plus what TOTK_CRASH_MEM / TOTK_CRASH_HEAPFIND / TOTK_CRASH_HEAPWALK ask for,

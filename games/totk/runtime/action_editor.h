@@ -11,56 +11,71 @@
 @property(strong) NSData *original;
 @property BOOL restartNotice;
 -(void)open:(id)sender;
+-(void)reset:(id)sender;
+-(NSString *)load;
+-(NSString *)save;
+-(void)addRowsTo:(NSView *)view y0:(CGFloat)y0 step:(CGFloat)step;
+-(void)noticeRestart;
 @end
 static TOTKActionEditor *actionEditor;
 @implementation TOTKActionEditor
 -(void)changed:(NSPopUpButton *)sender{draft.target[sender.tag]=action_binding_code_at((unsigned)sender.indexOfSelectedItem);}
 -(void)reset:(id)sender{(void)sender;action_bindings_default(&draft);for(unsigned i=0;i<ACTION_BINDING_COUNT;i++)[self.targets[i] selectItemAtIndex:action_binding_code_index(draft.target[i])];}
 -(void)cancel:(id)sender{(void)sender;[window endSheet:self.panel];}
--(void)apply:(id)sender{
- (void)sender;if(!action_bindings_valid(&draft))return;
+/* The checks and the write, shared by this sheet and the settings panel's controller sheet (controls_editor.h): nil when
+   saved, else what to tell the player. */
+-(NSString *)save{
+ if(!action_bindings_valid(&draft))return @(TOTK_UI("动作绑定无效。","Invalid action bindings."));
  NSError *error=nil;NSData *current=[NSData dataWithContentsOfFile:self.path options:0 error:&error];
- if(!current&&error.code!=NSFileReadNoSuchFileError){self.message.stringValue=error.localizedDescription;return;}
- if((current||self.original)&&![current isEqualToData:self.original]){self.message.stringValue=@(TOTK_UI("文件已被其他程序修改，请取消后重新打开。","File changed outside the editor. Cancel and reopen."));return;}
+ if(!current&&error.code!=NSFileReadNoSuchFileError)return error.localizedDescription;
+ if((current||self.original)&&![current isEqualToData:self.original])return @(TOTK_UI("文件已被其他程序修改，请取消后重新打开。","File changed outside the editor. Cancel and reopen."));
  /* A failed instruction guard refuses both live Apply and persistence. */
  RuntimeActionBindings previous;runtime_action_bindings_get(&previous);
- if(!runtime_action_bindings_set(&draft)){self.message.stringValue=@(TOTK_UI("版本或指令校验不通过，未保存。","Version/instruction checks failed; nothing saved."));return;}
+ if(!runtime_action_bindings_set(&draft))return @(TOTK_UI("版本或指令校验不通过，未保存。","Version/instruction checks failed; nothing saved."));
  NSMutableString *text=[NSMutableString string];for(unsigned i=0;i<ACTION_BINDING_COUNT;i++)[text appendFormat:i?@",%u":@"%u",draft.target[i]];[text appendString:@"\n"];
- if(![[text dataUsingEncoding:NSUTF8StringEncoding] writeToFile:self.path options:NSDataWritingAtomic error:&error]){
-  runtime_action_bindings_set(&previous);self.message.stringValue=error.localizedDescription;return;
- }
- self.restartNotice=!runtime_action_bindings_available();[window endSheet:self.panel];
+ NSData *data=[text dataUsingEncoding:NSUTF8StringEncoding];
+ if(![data writeToFile:self.path options:NSDataWritingAtomic error:&error]){runtime_action_bindings_set(&previous);return error.localizedDescription;}
+ self.original=data;self.restartNotice=!runtime_action_bindings_available();return nil;
 }
--(void)open:(id)sender{
- (void)sender;if(self.panel||textEntryOpen||window.attachedSheet)return;
- if(!runtime_action_bindings_supported()){
-  NSAlert *alert=[NSAlert new];alert.messageText=@(TOTK_UI("动作绑定仅支持王国之泪 1.0.0 / 1.4.3 Mac。","Player actions support TOTK 1.0.0 / 1.4.3 Mac only."));[alert beginSheetModalForWindow:window completionHandler:nil];return;
- }
- const char *controls=getenv("TOTK_CONTROLS");if(!controls||!*controls)return;
+-(void)apply:(id)sender{(void)sender;NSString *problem=[self save];if(problem){self.message.stringValue=problem;return;}[window endSheet:self.panel];}
+/* Reads player-actions.txt into the draft: nil, or what to tell the player (an alert). */
+-(NSString *)load{
+ if(!runtime_action_bindings_supported())return @(TOTK_UI("动作绑定仅支持王国之泪 1.0.0 / 1.4.3 Mac。","Player actions support TOTK 1.0.0 / 1.4.3 Mac only."));
+ const char *controls=getenv("TOTK_CONTROLS");if(!controls||!*controls)return @(TOTK_UI("启动器未设置 controls.txt 路径。","The launcher did not set a controls.txt path."));
  self.path=[[@(controls) stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"player-actions.txt"];
  NSError *error=nil;self.original=[NSData dataWithContentsOfFile:self.path options:0 error:&error];
- if(!self.original&&error.code!=NSFileReadNoSuchFileError){NSAlert *alert=[NSAlert new];alert.messageText=error.localizedDescription;[alert beginSheetModalForWindow:window completionHandler:nil];return;}
+ if(!self.original&&error.code!=NSFileReadNoSuchFileError)return error.localizedDescription;
  if(self.original){
   NSString *text=[[NSString alloc] initWithData:self.original encoding:NSUTF8StringEncoding];RuntimeActionBindings saved;
   NSString *trimmed=[text stringByTrimmingCharactersInSet:NSCharacterSet.newlineCharacterSet];
-  if(!trimmed||self.original.length>=512||memchr(self.original.bytes,0,self.original.length)||!action_bindings_parse(trimmed.UTF8String,&saved)){
-   NSAlert *alert=[NSAlert new];alert.messageText=@(TOTK_UI("player-actions.txt 格式错误，文件未改动。","Invalid player-actions.txt; file left unchanged."));[alert beginSheetModalForWindow:window completionHandler:nil];return;
-  }
+  if(!trimmed||self.original.length>=512||memchr(self.original.bytes,0,self.original.length)||!action_bindings_parse(trimmed.UTF8String,&saved))
+   return @(TOTK_UI("player-actions.txt 格式错误，文件未改动。","Invalid player-actions.txt; file left unchanged."));
  }
- runtime_action_bindings_get(&draft);
- self.panel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,540,642) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];self.panel.title=@(TOTK_UI("玩家动作（独立于菜单）","Player Actions (independent of menus)"));NSView *view=self.panel.contentView;
- NSTextField *intro=[NSTextField wrappingLabelWithString:@(TOTK_UI("来源是游戏看到的按键。只改场景动作，菜单确认、返回和切页保持原样；首次启用需重启。","Sources are game-visible buttons. Only gameplay actions change; menu confirm/back/tabs stay original. First use needs a restart."))];intro.frame=NSMakeRect(16,572,508,56);[view addSubview:intro];
+ runtime_action_bindings_get(&draft);return nil;
+}
+/* One row per source button, the first at y0 and each next one step further (negative in an unflipped view). */
+-(void)addRowsTo:(NSView *)view y0:(CGFloat)y0 step:(CGFloat)step{
  self.targets=[NSMutableArray array];NSMutableArray *names=[NSMutableArray array];for(unsigned j=0;j<action_binding_code_count();j++)[names addObject:@(action_binding_name(action_binding_code_at(j)))];
  for(unsigned i=0;i<ACTION_BINDING_COUNT;i++){
-  CGFloat y=542-i*30;NSTextField *label=[NSTextField labelWithString:@(action_binding_source_name(i))];label.frame=NSMakeRect(18,y+2,150,24);[view addSubview:label];
+  CGFloat y=y0+i*step;NSTextField *label=[NSTextField labelWithString:@(action_binding_source_name(i))];label.frame=NSMakeRect(18,y+2,150,24);[view addSubview:label];
   NSPopUpButton *p=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(174,y,346,28) pullsDown:NO];[p addItemsWithTitles:names];[p selectItemAtIndex:action_binding_code_index(draft.target[i])];p.tag=i;p.target=self;p.action=@selector(changed:);[view addSubview:p];[self.targets addObject:p];
  }
+}
+-(void)noticeRestart{
+ if(!self.restartNotice)return;
+ self.restartNotice=NO;NSAlert *alert=[NSAlert new];alert.messageText=@(TOTK_UI("动作布局已保存，下次启动生效","Actions saved; restart the game to enable them"));alert.informativeText=@(TOTK_UI("首次启用需重启。TOTK_PLAYER_ACTIONS=0 会禁用此功能。","First use needs a restart. TOTK_PLAYER_ACTIONS=0 disables this feature."));[alert beginSheetModalForWindow:window completionHandler:nil];
+}
+-(void)open:(id)sender{
+ (void)sender;if(self.panel||textEntryOpen||window.attachedSheet)return;
+ NSString *problem=[self load];
+ if(problem){NSAlert *alert=[NSAlert new];alert.messageText=problem;[alert beginSheetModalForWindow:window completionHandler:nil];return;}
+ self.panel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,540,642) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];self.panel.title=@(TOTK_UI("玩家动作（独立于菜单）","Player Actions (independent of menus)"));NSView *view=self.panel.contentView;
+ NSTextField *intro=[NSTextField wrappingLabelWithString:@(TOTK_UI("来源是游戏看到的按键。只改场景动作，菜单确认、返回和切页保持原样；首次启用需重启。","Sources are game-visible buttons. Only gameplay actions change; menu confirm/back/tabs stay original. First use needs a restart."))];intro.frame=NSMakeRect(16,572,508,56);[view addSubview:intro];
+ [self addRowsTo:view y0:542 step:-30];
  self.message=[NSTextField wrappingLabelWithString:runtime_action_bindings_available()?@(TOTK_UI("应用后立即生效。","Apply updates live gameplay.")):@(TOTK_UI("保存后重新启动游戏，以安装动作转换。","Save, then restart to install action translation."))];self.message.frame=NSMakeRect(16,40,508,42);[view addSubview:self.message];
  NSArray *titles=@[@(TOTK_UI("恢复默认","Reset Defaults")),@(TOTK_UI("取消","Cancel")),@(TOTK_UI("应用","Apply"))];SEL actions[]={@selector(reset:),@selector(cancel:),@selector(apply:)};
  for(unsigned i=0;i<3;i++){NSButton *b=[NSButton buttonWithTitle:titles[i] target:self action:actions[i]];b.frame=NSMakeRect(i?330+(i-1)*98:16,8,i?92:150,30);if(i==1)b.keyEquivalent=@"\e";if(i==2)b.keyEquivalent=@"\r";[view addSubview:b];}
  actionEditorOpen=YES;runtime_input_suspend(1);front_mouse_update();
- [window beginSheet:self.panel completionHandler:^(NSModalResponse response){(void)response;[self.panel orderOut:nil];self.panel=nil;actionEditorOpen=NO;runtime_input_suspend(0);front_mouse_update();
-  if(self.restartNotice){self.restartNotice=NO;NSAlert *alert=[NSAlert new];alert.messageText=@(TOTK_UI("动作布局已保存，下次启动生效","Actions saved; restart the game to enable them"));alert.informativeText=@(TOTK_UI("首次启用需重启。TOTK_PLAYER_ACTIONS=0 会禁用此功能。","First use needs a restart. TOTK_PLAYER_ACTIONS=0 disables this feature."));[alert beginSheetModalForWindow:window completionHandler:nil];}
- }];
+ [window beginSheet:self.panel completionHandler:^(NSModalResponse response){(void)response;[self.panel orderOut:nil];self.panel=nil;actionEditorOpen=NO;runtime_input_suspend(0);front_mouse_update();[self noticeRestart];}];
 }
 @end

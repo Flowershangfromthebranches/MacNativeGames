@@ -105,6 +105,15 @@ int runtime_output_mode(void);
 int runtime_output_mode_set(int mode);                  /* returns 0 where that mode is not offered */
 int runtime_output_native(int mode, unsigned *w, unsigned *h);   /* the canvas of OUTPUT_MODE_NATIVE / _NATIVE_METALFX; 0 when not offered */
 uint64_t runtime_output_size_current(void);              /* configured canvas: width in low 32 bits, height in high 32 bits */
+/* The settings panel's picture (user 2026-10-26; TOTK game_patches.c / game_patches_v143.c): the canvas the game draws
+   (720p, 900p, 1080p or 1440p, up to the swapchain; the window shows it, no MetalFX output stage) and, where the scene's
+   size can follow it (1.4.3), the MetalFX spatial preset that renders the scene below the canvas for MetalFX to rebuild.
+   runtime_picture_canvas_max: the largest canvas, 0 where the panel keeps the OUTPUT_MODE_* list (Breath of the Wild). */
+enum { PICTURE_PRESET_OFF, PICTURE_PRESET_QUALITY, PICTURE_PRESET_BALANCED, PICTURE_PRESET_PERFORMANCE, PICTURE_PRESETS };
+int runtime_picture_canvas_max(unsigned *w, unsigned *h);
+int runtime_picture_presets(void);                       /* 1 where the MetalFX presets are offered */
+int runtime_picture_preset(void);
+int runtime_picture_set(unsigned w, unsigned h, int preset);   /* returns 0 where that canvas or preset is not offered */
 void runtime_warm_progress(uint64_t done,uint64_t total,uint64_t shaders,uint64_t shader_total,uint64_t pipelines,uint64_t pipeline_total);
 void runtime_warm_done(void);
 void runtime_game_slot_acquire(const char *mode);   /* runtime/game_slot.c: one game at a time */

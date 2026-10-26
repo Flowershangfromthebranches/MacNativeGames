@@ -111,6 +111,15 @@ static CVReturn vsync_callback(CVDisplayLinkRef link,const CVTimeStamp *now,cons
  (void)link;(void)now;(void)output;(void)flags;(void)out;(void)ctx;
  pthread_mutex_lock(&vsyncLock);for(unsigned i=0;i<vsyncCount;i++)hle_signal_system_event(vsyncEvents[i]);pthread_mutex_unlock(&vsyncLock);return kCVReturnSuccess;
 }
+/* The game's window. Borderless (the settings panel's window mode) it still takes the keyboard, and Command-Q / the
+   close request still close it: without a title bar performClose: would only beep. */
+@interface TOTKGameWindow:NSWindow
+@end
+@implementation TOTKGameWindow
+-(BOOL)canBecomeKeyWindow{return YES;}
+-(BOOL)canBecomeMainWindow{return YES;}
+-(void)performClose:(id)sender{if(!(self.styleMask&NSWindowStyleMaskTitled)){[self close];return;}[super performClose:sender];}
+@end
 @interface TOTKInputView:NSView
 @property(strong) NSTimer *cursorHideTimer;
 @property BOOL cursorAutoHideActive;
@@ -177,8 +186,8 @@ static void front_mouse_update(void){   /* main thread; also runtime/gamepad.m's
  }
  fprintf(stderr,"[totk] mouse %s\n",want?"held by the window (the settings panel, key 1, or Command-Tab lets it go)":"let go");
 }
-#include "controls_editor.h"
 #include "action_editor.h"
+#include "controls_editor.h"
 @interface TOTKHudBox:NSView
 @property(strong) NSTextField *label;
 @property(strong) NSTimer *timer;
@@ -307,7 +316,9 @@ void runtime_front_resize_aspect(double ratio){
 }
 -(void)windowDidResize:(NSNotification *)n{(void)n;front_sync_drawable();}
 -(void)windowDidEnterFullScreen:(NSNotification *)n{(void)n;[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:window.isKeyWindow];}
--(void)windowDidExitFullScreen:(NSNotification *)n{(void)n;[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:NO];}
+-(void)windowDidExitFullScreen:(NSNotification *)n{(void)n;[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:NO];settings_window_mode_after_full();}
+-(void)windowDidBecomeMain:(NSNotification *)n{(void)n;settings_presentation();}
+-(void)windowDidResignMain:(NSNotification *)n{(void)n;settings_presentation();}
 /* Whether any part of the window can be seen (TOTK, 2026-10-16 night): macOS stops the display link's callbacks for a
    fully covered window, so presents stop and per-picture measurements of that stretch are void; a test session's log
    says when (the user working in other apps covered the test windows of the frame interpolation tests). */
@@ -347,7 +358,7 @@ void runtime_front_run(void(*callback)(void)){
   NSRect vis=NSScreen.mainScreen?NSScreen.mainScreen.visibleFrame:NSMakeRect(0,0,1920,1080+28);CGFloat ww=1920,wh=1080;
   {const char *e=getenv("TOTK_WINDOW_SIZE");int w=0,h=0;if(e&&sscanf(e,"%dx%d",&w,&h)==2&&w>=320&&h>=180&&w<=8192&&h<=8192){ww=w;wh=h;}}
   CGFloat k=fmin(1,fmin(vis.size.width/ww,(vis.size.height-28)/wh));ww=floor(ww*k);wh=floor(wh*k);
-  window=[[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,ww,wh) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
+  window=[[TOTKGameWindow alloc] initWithContentRect:NSMakeRect(0,0,ww,wh) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
   window.releasedWhenClosed=NO;   /* a close that waits for a save (windowWillClose) must not free the window the static pointer still holds */
   /* An agent's test game (TOTK_SLOT_OWNER other than user) says so in its title: it plays a save copy and its script closes it. */
   const char *owner=getenv("TOTK_SLOT_OWNER"),*purpose=getenv("TOTK_SLOT_PURPOSE");
